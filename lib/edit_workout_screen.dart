@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'workouts_screen.dart';
 import 'dart:ui';
+import 'package:flutter/services.dart';
 
 // Domain models from the spec
 enum IntervalKind {
@@ -45,6 +46,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   String? _errorMessage;
   List<Interval> _intervals = [];
   int _nextId = 100;
+  final _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -52,7 +54,14 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     _fetchIntervals();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   void _insertIntervals(int index, List<IntervalKind> kinds) {
+    final isAppending = index >= _intervals.length;
     setState(() {
       final newIntervals = kinds.map((kind) {
         _nextId++;
@@ -84,6 +93,17 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       }).toList();
       _intervals.insertAll(index, newIntervals);
     });
+    if (isAppending) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   Future<void> _fetchIntervals() async {
@@ -181,12 +201,22 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       ),
       body: _buildBody(),
       floatingActionButton: MenuAnchor(
+        style: MenuStyle(
+          backgroundColor: WidgetStateProperty.all(
+            Theme.of(context).colorScheme.surfaceContainer,
+          ),
+          elevation: WidgetStateProperty.all(3.0),
+          shape: WidgetStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+          ),
+        ),
         builder: (context, controller, child) {
           return FloatingActionButton(
             onPressed: () {
               if (controller.isOpen) {
                 controller.close();
               } else {
+                HapticFeedback.selectionClick();
                 controller.open();
               }
             },
@@ -195,25 +225,34 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
         },
         menuChildren: [
           MenuItemButton(
-            onPressed: () =>
-                _insertIntervals(_intervals.length, [IntervalKind.prepare]),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [IntervalKind.prepare]);
+            },
             child: const Text('Подготовка'),
           ),
           MenuItemButton(
-            onPressed: () =>
-                _insertIntervals(_intervals.length, [IntervalKind.work]),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [IntervalKind.work]);
+            },
             child: const Text('Работа'),
           ),
           MenuItemButton(
-            onPressed: () =>
-                _insertIntervals(_intervals.length, [IntervalKind.rest]),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [IntervalKind.rest]);
+            },
             child: const Text('Отдых'),
           ),
           MenuItemButton(
-            onPressed: () => _insertIntervals(_intervals.length, [
-              IntervalKind.work,
-              IntervalKind.rest,
-            ]),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [
+                IntervalKind.work,
+                IntervalKind.rest,
+              ]);
+            },
             child: const Text('Работа + Отдых'),
           ),
         ],
@@ -229,6 +268,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       return Center(child: Text(_errorMessage!));
     }
     return ReorderableListView.builder(
+      scrollController: _scrollController,
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
       itemCount: _intervals.length,
       itemBuilder: (context, index) {
