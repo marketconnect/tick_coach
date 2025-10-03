@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'agent_entry.dart';
 
 // Data model based on <entity id="Workout">
 class Workout {
@@ -34,6 +37,7 @@ class WorkoutsScreen extends StatefulWidget {
 }
 
 class _WorkoutsScreenState extends State<WorkoutsScreen> {
+  int _index = 0;
   // State management based on <screen id="workouts_screen"> states
   bool _isLoading = true;
   String? _errorMessage;
@@ -109,38 +113,69 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isWorkoutsTab = _index == 0;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Тренировки: ${_workouts.length}'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.payments),
-            tooltip: 'Поддержать проект',
-            onPressed: () {
-              /* OpenDonations */
-            },
+        title: Text(isWorkoutsTab ? 'Тренировки: ${_workouts.length}' : 'AI'),
+        actions: isWorkoutsTab
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.payments),
+                  tooltip: 'Поддержать проект',
+                  onPressed: () {
+                    /* OpenDonations */
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Настройки приложения',
+                  onPressed: () {
+                    /* OpenAppSettings */
+                  },
+                ),
+              ]
+            : null,
+      ),
+      body: switch (_index) {
+        0 => _buildWorkoutsBody(),
+        1 => const AgentEntry(),
+        _ => const SizedBox.shrink(),
+      },
+      floatingActionButton: isWorkoutsTab
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                /* CreateWorkout */
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить тренировку'),
+            )
+          : null,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) {
+          HapticFeedback.selectionClick();
+          setState(() => _index = i);
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.fitness_center_outlined),
+            selectedIcon: Icon(Icons.fitness_center),
+            label: 'Тренировки',
           ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Настройки приложения',
-            onPressed: () {
-              /* OpenAppSettings */
-            },
+          NavigationDestination(
+            icon: Icon(Icons.auto_awesome_outlined),
+            selectedIcon: Icon(Icons.auto_awesome),
+            label: 'AI',
           ),
         ],
-      ),
-      body: _buildBody(),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          /* CreateWorkout */
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Добавить тренировку'),
+        indicatorColor: cs.secondaryContainer,
       ),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildWorkoutsBody() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
