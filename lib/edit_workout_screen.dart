@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'workouts_screen.dart';
 import 'dart:ui';
 import 'package:flutter/services.dart';
+import 'database_helper.dart';
+import 'dart:math';
 
 // Domain models from the spec
 enum IntervalKind { prepare, work, rest, between_sets, work_and_rest, custom }
@@ -42,7 +44,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   String? _errorMessage;
   List<Interval> _intervals = [];
   int _setCount = 1;
-  int _nextId = 100;
+  int _nextId = 0;
   final _scrollController = ScrollController();
 
   @override
@@ -62,6 +64,8 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     setState(() {
       final newIntervals = kinds.map((kind) {
         _nextId++;
+        final newId =
+            '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
         String title;
         int duration;
         switch (kind) {
@@ -86,7 +90,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
             duration = 60;
         }
         return Interval(
-          id: _nextId.toString(),
+          id: newId,
           kind: kind,
           durationSec: duration,
           title: title,
@@ -114,43 +118,87 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       _isLoading = true;
       _errorMessage = null;
     });
-    await Future.delayed(const Duration(milliseconds: 500)); // Simulate loading
-    setState(() {
-      _intervals = [
-        Interval(
-          id: '1',
-          kind: IntervalKind.prepare,
-          durationSec: 10,
-          title: 'Подготовка',
-        ),
-        Interval(
-          id: '2',
-          kind: IntervalKind.work,
-          durationSec: 20,
-          title: 'Работа',
-          description: 'Например: Отжимания 15 раз',
-        ),
-        Interval(
-          id: '3',
-          kind: IntervalKind.rest,
-          durationSec: 10,
-          title: 'Отдых',
-        ),
-        Interval(
-          id: '4',
-          kind: IntervalKind.work,
-          durationSec: 20,
-          title: 'Работа',
-        ),
-        Interval(
-          id: '5',
-          kind: IntervalKind.rest,
-          durationSec: 10,
-          title: 'Отдых',
-        ),
-      ];
-      _isLoading = false;
-    });
+    try {
+      final dbHelper = DatabaseHelper.instance;
+      final intervals = await dbHelper.getIntervalsForWorkout(
+        widget.workout.id,
+      );
+      final setCount = await dbHelper.getSetCountForWorkout(widget.workout.id);
+      if (!mounted) return;
+      if (intervals.isEmpty) {
+        setState(() {
+          _intervals = [
+            Interval(
+              id: '1',
+              kind: IntervalKind.prepare,
+              durationSec: 10,
+              title: 'Подготовка',
+            ),
+            Interval(
+              id: '2',
+              kind: IntervalKind.work,
+              durationSec: 20,
+              title: 'Работа',
+              description: 'Например: Отжимания 15 раз',
+            ),
+            Interval(
+              id: '3',
+              kind: IntervalKind.rest,
+              durationSec: 10,
+              title: 'Отдых',
+            ),
+            Interval(
+              id: '4',
+              kind: IntervalKind.work,
+              durationSec: 20,
+              title: 'Работа',
+            ),
+            Interval(
+              id: '5',
+              kind: IntervalKind.rest,
+              durationSec: 10,
+              title: 'Отдых',
+            ),
+          ];
+          _setCount = 1;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _intervals = intervals;
+          _setCount = setCount;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Ошибка загрузки тренировки: $e';
+      });
+    }
+  }
+
+  Future<void> _saveWorkout() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
+    try {
+      await DatabaseHelper.instance.saveWorkout(
+        widget.workout,
+        _intervals,
+        _setCount,
+      );
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Тренировка сохранена!')),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
+    }
   }
 
   void _changeDuration(String intervalId, int delta) {
@@ -305,7 +353,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           IconButton(
             icon: const Icon(Icons.check_sharp),
             tooltip: 'Сохранить',
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _saveWorkout,
           ),
           const SizedBox(width: 8),
         ],
