@@ -44,11 +44,46 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   List<Interval> _intervals = [];
+  int _nextId = 100;
 
   @override
   void initState() {
     super.initState();
     _fetchIntervals();
+  }
+
+  void _insertIntervals(int index, List<IntervalKind> kinds) {
+    setState(() {
+      final newIntervals = kinds.map((kind) {
+        _nextId++;
+        String title;
+        int duration;
+        switch (kind) {
+          case IntervalKind.prepare:
+            title = 'Подготовка';
+            duration = 10;
+            break;
+          case IntervalKind.work:
+            title = 'Работа';
+            duration = 30;
+            break;
+          case IntervalKind.rest:
+            title = 'Отдых';
+            duration = 15;
+            break;
+          default:
+            title = kind.name.capitalize();
+            duration = 60;
+        }
+        return Interval(
+          id: _nextId.toString(),
+          kind: kind,
+          durationSec: duration,
+          title: title,
+        );
+      }).toList();
+      _intervals.insertAll(index, newIntervals);
+    });
   }
 
   Future<void> _fetchIntervals() async {
@@ -145,11 +180,43 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
         ],
       ),
       body: _buildBody(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Implement FAB menu for appending intervals
+      floatingActionButton: MenuAnchor(
+        builder: (context, controller, child) {
+          return FloatingActionButton(
+            onPressed: () {
+              if (controller.isOpen) {
+                controller.close();
+              } else {
+                controller.open();
+              }
+            },
+            child: const Icon(Icons.add),
+          );
         },
-        child: const Icon(Icons.add),
+        menuChildren: [
+          MenuItemButton(
+            onPressed: () =>
+                _insertIntervals(_intervals.length, [IntervalKind.prepare]),
+            child: const Text('Подготовка'),
+          ),
+          MenuItemButton(
+            onPressed: () =>
+                _insertIntervals(_intervals.length, [IntervalKind.work]),
+            child: const Text('Работа'),
+          ),
+          MenuItemButton(
+            onPressed: () =>
+                _insertIntervals(_intervals.length, [IntervalKind.rest]),
+            child: const Text('Отдых'),
+          ),
+          MenuItemButton(
+            onPressed: () => _insertIntervals(_intervals.length, [
+              IntervalKind.work,
+              IntervalKind.rest,
+            ]),
+            child: const Text('Работа + Отдых'),
+          ),
+        ],
       ),
     );
   }
@@ -174,6 +241,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           onDecrement: () => _changeDuration(interval.id, -5),
           onIncrement: () => _changeDuration(interval.id, 5),
           onDelete: () => _deleteInterval(interval.id),
+          onInsert: _insertIntervals,
         );
       },
       onReorder: _onReorder,
@@ -188,6 +256,7 @@ class IntervalCard extends StatelessWidget {
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final VoidCallback onDelete;
+  final void Function(int index, List<IntervalKind> kinds) onInsert;
 
   const IntervalCard({
     super.key,
@@ -197,6 +266,7 @@ class IntervalCard extends StatelessWidget {
     required this.onIncrement,
     required this.onDecrement,
     required this.onDelete,
+    required this.onInsert,
   });
 
   @override
@@ -237,33 +307,83 @@ class IntervalCard extends StatelessWidget {
             onPressed: onIncrement,
             tooltip: 'Увеличить',
           ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'delete') {
-                onDelete();
-              }
-              // Other actions can be handled here
+          MenuAnchor(
+            builder: (context, controller, child) {
+              return IconButton(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'Действия',
+                onPressed: () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
+                },
+              );
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'insert_above',
-                child: Text('Вставить выше'),
+            menuChildren: [
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () => onInsert(index, [IntervalKind.prepare]),
+                    child: const Text('Подготовка'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => onInsert(index, [IntervalKind.work]),
+                    child: const Text('Работа'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => onInsert(index, [IntervalKind.rest]),
+                    child: const Text('Отдых'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () =>
+                        onInsert(index, [IntervalKind.work, IntervalKind.rest]),
+                    child: const Text('Работа + Отдых'),
+                  ),
+                ],
+                child: const Text('Вставить выше'),
               ),
-              const PopupMenuItem(
-                value: 'insert_below',
-                child: Text('Вставить ниже'),
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () =>
+                        onInsert(index + 1, [IntervalKind.prepare]),
+                    child: const Text('Подготовка'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => onInsert(index + 1, [IntervalKind.work]),
+                    child: const Text('Работа'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => onInsert(index + 1, [IntervalKind.rest]),
+                    child: const Text('Отдых'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => onInsert(index + 1, [
+                      IntervalKind.work,
+                      IntervalKind.rest,
+                    ]),
+                    child: const Text('Работа + Отдых'),
+                  ),
+                ],
+                child: const Text('Вставить ниже'),
               ),
-              const PopupMenuItem(
-                value: 'duplicate',
-                child: Text('Копировать'),
+              MenuItemButton(
+                onPressed: () {
+                  // TODO: Implement duplicate
+                },
+                child: const Text('Копировать'),
               ),
-              const PopupMenuItem(
-                value: 'attach_image',
-                child: Text('Добавить фото'),
+              MenuItemButton(
+                onPressed: () {
+                  // TODO: Implement attach image
+                },
+                child: const Text('Добавить фото'),
               ),
-              const PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'delete',
+              const Divider(),
+              MenuItemButton(
+                onPressed: onDelete,
                 child: Text(
                   'Удалить',
                   style: TextStyle(color: colorScheme.error),
