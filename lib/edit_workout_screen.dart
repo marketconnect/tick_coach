@@ -401,6 +401,13 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
         );
       },
       onReorder: _onReorder,
+      proxyDecorator: (Widget child, int index, Animation<double> animation) {
+        return Material(
+          elevation: 4.0,
+          color: Colors.transparent,
+          child: child,
+        );
+      },
     );
   }
 }
@@ -454,27 +461,27 @@ class _IntervalCardState extends State<IntervalCard> {
     super.dispose();
   }
 
-  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
-  //   switch (kind) {
-  //     case IntervalKind.work:
-  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
-  //     case IntervalKind.rest:
-  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
-  //     case IntervalKind.prepare:
-  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
+  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
+    switch (kind) {
+      case IntervalKind.rest:
+        return Icon(Icons.self_improvement, color: Colors.green.shade600);
+      case IntervalKind.prepare:
+        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
 
-  //     default:
-  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
-  //   }
-  // }
+      default:
+        return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
+    final isWorkInterval = widget.interval.kind == IntervalKind.work;
+    final isReps = isWorkInterval && widget.interval.isRepsBased;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      color: isWorkInterval ? colorScheme.surfaceContainerLow : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -484,7 +491,7 @@ class _IntervalCardState extends State<IntervalCard> {
               ReorderableDragStartListener(
                 index: widget.index,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8.0, 12.0, 8.0, 12.0),
+                  padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
                   child: Icon(Icons.drag_handle, color: theme.disabledColor),
                 ),
               ),
@@ -513,7 +520,7 @@ class _IntervalCardState extends State<IntervalCard> {
                         ),
                         TextButton(
                           onPressed: widget.onEditValue,
-                          child: widget.interval.isRepsBased
+                          child: isReps
                               ? Text(
                                   '${widget.interval.reps} повт.',
                                   style: theme.textTheme.bodyLarge,
@@ -539,16 +546,20 @@ class _IntervalCardState extends State<IntervalCard> {
                   ],
                 ),
               ),
-              IconButton(
-                icon: Icon(
-                  widget.interval.isRepsBased
-                      ? Icons.repeat
-                      : Icons.timer_outlined,
-                ),
-                onPressed: widget.onToggleMetric,
-                tooltip:
-                    'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
-              ),
+              if (isWorkInterval)
+                IconButton(
+                  icon: Icon(
+                    widget.interval.isRepsBased
+                        ? Icons.repeat
+                        : Icons.timer_outlined,
+                  ),
+                  onPressed: widget.onToggleMetric,
+                  tooltip:
+                      'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
+                )
+              else
+                const SizedBox(width: 48),
+
               MenuAnchor(
                 builder: (context, controller, child) {
                   return IconButton(
