@@ -91,7 +91,9 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           title: title,
         );
       }).toList();
-      _intervals.insertAll(index, newIntervals);
+      final List<Interval> updatedList = List.from(_intervals)
+        ..insertAll(index, newIntervals);
+      _intervals = updatedList;
     });
     if (isAppending) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -125,6 +127,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           kind: IntervalKind.work,
           durationSec: 20,
           title: 'Упражнение 1',
+          description: 'Например: Отжимания 15 раз',
         ),
         Interval(
           id: '3',
@@ -168,6 +171,12 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     });
   }
 
+  void _updateIntervalDescription(String id, String description) {
+    setState(() {
+      _intervals.firstWhere((i) => i.id == id).description = description;
+    });
+  }
+
   void _onReorder(int oldIndex, int newIndex) {
     setState(() {
       if (newIndex > oldIndex) {
@@ -203,7 +212,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       floatingActionButton: MenuAnchor(
         style: MenuStyle(
           backgroundColor: WidgetStateProperty.all(
-            Theme.of(context).colorScheme.surfaceContainer,
+            Theme.of(context).colorScheme.surfaceContainerHighest,
           ),
           elevation: WidgetStateProperty.all(3.0),
           shape: WidgetStateProperty.all(
@@ -282,6 +291,8 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           onIncrement: () => _changeDuration(interval.id, 5),
           onDelete: () => _deleteInterval(interval.id),
           onInsert: _insertIntervals,
+          onDescriptionChanged: (newDescription) =>
+              _updateIntervalDescription(interval.id, newDescription),
         );
       },
       onReorder: _onReorder,
@@ -289,7 +300,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   }
 }
 
-class IntervalCard extends StatelessWidget {
+class IntervalCard extends StatefulWidget {
   final Interval interval;
   final int index;
   final String Function(int) formatDuration;
@@ -297,6 +308,7 @@ class IntervalCard extends StatelessWidget {
   final VoidCallback onDecrement;
   final VoidCallback onDelete;
   final void Function(int index, List<IntervalKind> kinds) onInsert;
+  final void Function(String newDescription) onDescriptionChanged;
 
   const IntervalCard({
     super.key,
@@ -307,7 +319,47 @@ class IntervalCard extends StatelessWidget {
     required this.onDecrement,
     required this.onDelete,
     required this.onInsert,
+    required this.onDescriptionChanged,
   });
+
+  @override
+  State<IntervalCard> createState() => _IntervalCardState();
+}
+
+class _IntervalCardState extends State<IntervalCard> {
+  late final TextEditingController _descriptionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController(
+      text: widget.interval.description,
+    );
+    _descriptionController.addListener(() {
+      widget.onDescriptionChanged(_descriptionController.text);
+    });
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
+    switch (kind) {
+      case IntervalKind.work:
+        return Icon(Icons.fitness_center, color: colorScheme.primary);
+      case IntervalKind.rest:
+        return Icon(Icons.self_improvement, color: Colors.green.shade600);
+      case IntervalKind.prepare:
+        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
+      case IntervalKind.calmdown:
+        return Icon(Icons.spa_outlined, color: Colors.blue.shade600);
+      default:
+        return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -317,34 +369,56 @@ class IntervalCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           ReorderableDragStartListener(
-            index: index,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12.0),
-              child: Icon(Icons.drag_handle),
+            index: widget.index,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12.0, right: 8.0),
+              child: Icon(Icons.drag_handle, color: theme.disabledColor),
             ),
           ),
+          _getIntervalIcon(widget.interval.kind, colorScheme),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              interval.title ?? interval.kind.name.capitalize(),
-              style: theme.textTheme.titleMedium,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.interval.title ??
+                        widget.interval.kind.name.capitalize(),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  TextFormField(
+                    controller: _descriptionController,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Описание',
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.remove),
-            onPressed: onDecrement,
+            onPressed: widget.onDecrement,
             tooltip: 'Уменьшить',
           ),
           Text(
-            formatDuration(interval.durationSec),
+            widget.formatDuration(widget.interval.durationSec),
             style: theme.textTheme.bodyLarge?.copyWith(
               fontFeatures: [const FontFeature.tabularFigures()],
             ),
           ),
           IconButton(
             icon: const Icon(Icons.add),
-            onPressed: onIncrement,
+            onPressed: widget.onIncrement,
             tooltip: 'Увеличить',
           ),
           MenuAnchor(
@@ -353,6 +427,7 @@ class IntervalCard extends StatelessWidget {
                 icon: const Icon(Icons.more_vert),
                 tooltip: 'Действия',
                 onPressed: () {
+                  HapticFeedback.selectionClick();
                   if (controller.isOpen) {
                     controller.close();
                   } else {
@@ -365,20 +440,25 @@ class IntervalCard extends StatelessWidget {
               SubmenuButton(
                 menuChildren: [
                   MenuItemButton(
-                    onPressed: () => onInsert(index, [IntervalKind.prepare]),
+                    onPressed: () =>
+                        widget.onInsert(widget.index, [IntervalKind.prepare]),
                     child: const Text('Подготовка'),
                   ),
                   MenuItemButton(
-                    onPressed: () => onInsert(index, [IntervalKind.work]),
+                    onPressed: () =>
+                        widget.onInsert(widget.index, [IntervalKind.work]),
                     child: const Text('Работа'),
                   ),
                   MenuItemButton(
-                    onPressed: () => onInsert(index, [IntervalKind.rest]),
+                    onPressed: () =>
+                        widget.onInsert(widget.index, [IntervalKind.rest]),
                     child: const Text('Отдых'),
                   ),
                   MenuItemButton(
-                    onPressed: () =>
-                        onInsert(index, [IntervalKind.work, IntervalKind.rest]),
+                    onPressed: () => widget.onInsert(widget.index, [
+                      IntervalKind.work,
+                      IntervalKind.rest,
+                    ]),
                     child: const Text('Работа + Отдых'),
                   ),
                 ],
@@ -387,20 +467,23 @@ class IntervalCard extends StatelessWidget {
               SubmenuButton(
                 menuChildren: [
                   MenuItemButton(
-                    onPressed: () =>
-                        onInsert(index + 1, [IntervalKind.prepare]),
+                    onPressed: () => widget.onInsert(widget.index + 1, [
+                      IntervalKind.prepare,
+                    ]),
                     child: const Text('Подготовка'),
                   ),
                   MenuItemButton(
-                    onPressed: () => onInsert(index + 1, [IntervalKind.work]),
+                    onPressed: () =>
+                        widget.onInsert(widget.index + 1, [IntervalKind.work]),
                     child: const Text('Работа'),
                   ),
                   MenuItemButton(
-                    onPressed: () => onInsert(index + 1, [IntervalKind.rest]),
+                    onPressed: () =>
+                        widget.onInsert(widget.index + 1, [IntervalKind.rest]),
                     child: const Text('Отдых'),
                   ),
                   MenuItemButton(
-                    onPressed: () => onInsert(index + 1, [
+                    onPressed: () => widget.onInsert(widget.index + 1, [
                       IntervalKind.work,
                       IntervalKind.rest,
                     ]),
@@ -423,7 +506,7 @@ class IntervalCard extends StatelessWidget {
               ),
               const Divider(),
               MenuItemButton(
-                onPressed: onDelete,
+                onPressed: widget.onDelete,
                 child: Text(
                   'Удалить',
                   style: TextStyle(color: colorScheme.error),
