@@ -156,12 +156,23 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   void _changeDuration(String intervalId, int delta) {
     setState(() {
       final interval = _intervals.firstWhere((i) => i.id == intervalId);
-      interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
+
       if (interval.isRepsBased) {
         final repsDelta = delta > 0 ? 1 : -1;
         interval.reps = (interval.reps + repsDelta).clamp(0, 1000);
       } else {
         interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
+      }
+    });
+  }
+
+  void _updateIntervalValue(String intervalId, int newValue) {
+    setState(() {
+      final interval = _intervals.firstWhere((i) => i.id == intervalId);
+      if (interval.isRepsBased) {
+        interval.reps = newValue.clamp(0, 1000);
+      } else {
+        interval.durationSec = newValue.clamp(0, 86400);
       }
     });
   }
@@ -183,6 +194,46 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       final interval = _intervals.firstWhere((i) => i.id == intervalId);
       interval.isRepsBased = !interval.isRepsBased;
     });
+  }
+
+  Future<void> _showEditValueDialog(Interval interval) async {
+    final controller = TextEditingController(
+      text: (interval.isRepsBased ? interval.reps : interval.durationSec)
+          .toString(),
+    );
+    final newValueStr = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          interval.isRepsBased
+              ? 'Количество повторений'
+              : 'Продолжительность (сек)',
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(labelText: 'Укажите значение'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (newValueStr != null) {
+      final newValue = int.tryParse(newValueStr);
+      if (newValue != null && newValue >= 0) {
+        _updateIntervalValue(interval.id, newValue);
+      }
+    }
   }
 
   void _onReorder(int oldIndex, int newIndex) {
@@ -346,6 +397,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           onDescriptionChanged: (newDescription) =>
               _updateIntervalDescription(interval.id, newDescription),
           onToggleMetric: () => _toggleMetric(interval.id),
+          onEditValue: () => _showEditValueDialog(interval),
         );
       },
       onReorder: _onReorder,
@@ -363,6 +415,7 @@ class IntervalCard extends StatefulWidget {
   final void Function(int index, List<IntervalKind> kinds) onInsert;
   final void Function(String newDescription) onDescriptionChanged;
   final VoidCallback onToggleMetric;
+  final VoidCallback onEditValue;
   const IntervalCard({
     super.key,
     required this.interval,
@@ -374,6 +427,7 @@ class IntervalCard extends StatefulWidget {
     required this.onInsert,
     required this.onDescriptionChanged,
     required this.onToggleMetric,
+    required this.onEditValue,
   });
 
   @override
@@ -458,7 +512,7 @@ class _IntervalCardState extends State<IntervalCard> {
                           tooltip: 'Уменьшить',
                         ),
                         TextButton(
-                          onPressed: widget.onToggleMetric,
+                          onPressed: widget.onEditValue,
                           child: widget.interval.isRepsBased
                               ? Text(
                                   '${widget.interval.reps} повт.',
@@ -484,6 +538,16 @@ class _IntervalCardState extends State<IntervalCard> {
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                icon: Icon(
+                  widget.interval.isRepsBased
+                      ? Icons.repeat
+                      : Icons.timer_outlined,
+                ),
+                onPressed: widget.onToggleMetric,
+                tooltip:
+                    'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
               ),
               MenuAnchor(
                 builder: (context, controller, child) {
