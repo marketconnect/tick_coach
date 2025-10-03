@@ -12,6 +12,8 @@ class Interval {
   String? title;
   String? description;
   int durationSec;
+  int reps;
+  bool isRepsBased;
   String? imageUri;
 
   Interval({
@@ -20,6 +22,8 @@ class Interval {
     this.title,
     this.description,
     required this.durationSec,
+    this.reps = 10,
+    this.isRepsBased = false,
     this.imageUri,
   });
 }
@@ -153,6 +157,12 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     setState(() {
       final interval = _intervals.firstWhere((i) => i.id == intervalId);
       interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
+      if (interval.isRepsBased) {
+        final repsDelta = delta > 0 ? 1 : -1;
+        interval.reps = (interval.reps + repsDelta).clamp(0, 1000);
+      } else {
+        interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
+      }
     });
   }
 
@@ -165,6 +175,13 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   void _updateIntervalDescription(String id, String description) {
     setState(() {
       _intervals.firstWhere((i) => i.id == id).description = description;
+    });
+  }
+
+  void _toggleMetric(String intervalId) {
+    setState(() {
+      final interval = _intervals.firstWhere((i) => i.id == intervalId);
+      interval.isRepsBased = !interval.isRepsBased;
     });
   }
 
@@ -282,7 +299,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
             },
             child: const Text('Отдых'),
           ),
-
           MenuItemButton(
             onPressed: () {
               HapticFeedback.selectionClick();
@@ -329,6 +345,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           onInsert: _insertIntervals,
           onDescriptionChanged: (newDescription) =>
               _updateIntervalDescription(interval.id, newDescription),
+          onToggleMetric: () => _toggleMetric(interval.id),
         );
       },
       onReorder: _onReorder,
@@ -345,7 +362,7 @@ class IntervalCard extends StatefulWidget {
   final VoidCallback onDelete;
   final void Function(int index, List<IntervalKind> kinds) onInsert;
   final void Function(String newDescription) onDescriptionChanged;
-
+  final VoidCallback onToggleMetric;
   const IntervalCard({
     super.key,
     required this.interval,
@@ -356,6 +373,7 @@ class IntervalCard extends StatefulWidget {
     required this.onDelete,
     required this.onInsert,
     required this.onDescriptionChanged,
+    required this.onToggleMetric,
   });
 
   @override
@@ -382,19 +400,19 @@ class _IntervalCardState extends State<IntervalCard> {
     super.dispose();
   }
 
-  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
-    switch (kind) {
-      case IntervalKind.work:
-        return Icon(Icons.fitness_center, color: colorScheme.primary);
-      case IntervalKind.rest:
-        return Icon(Icons.self_improvement, color: Colors.green.shade600);
-      case IntervalKind.prepare:
-        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
+  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
+  //   switch (kind) {
+  //     case IntervalKind.work:
+  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
+  //     case IntervalKind.rest:
+  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
+  //     case IntervalKind.prepare:
+  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
 
-      default:
-        return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
-    }
-  }
+  //     default:
+  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -412,15 +430,15 @@ class _IntervalCardState extends State<IntervalCard> {
               ReorderableDragStartListener(
                 index: widget.index,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12.0, 12.0, 8.0, 12.0),
+                  padding: const EdgeInsets.fromLTRB(8.0, 12.0, 8.0, 12.0),
                   child: Icon(Icons.drag_handle, color: theme.disabledColor),
                 ),
               ),
+
               // _getIntervalIcon(widget.interval.kind, colorScheme),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
@@ -428,20 +446,34 @@ class _IntervalCardState extends State<IntervalCard> {
                         widget.interval.title ??
                             widget.interval.kind.name.capitalize(),
                         style: theme.textTheme.titleMedium,
+                        textAlign: TextAlign.center,
                       ),
                     ),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         IconButton(
                           icon: const Icon(Icons.remove),
                           onPressed: widget.onDecrement,
                           tooltip: 'Уменьшить',
                         ),
-                        Text(
-                          widget.formatDuration(widget.interval.durationSec),
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontFeatures: [const FontFeature.tabularFigures()],
-                          ),
+                        TextButton(
+                          onPressed: widget.onToggleMetric,
+                          child: widget.interval.isRepsBased
+                              ? Text(
+                                  '${widget.interval.reps} повт.',
+                                  style: theme.textTheme.bodyLarge,
+                                )
+                              : Text(
+                                  widget.formatDuration(
+                                    widget.interval.durationSec,
+                                  ),
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    fontFeatures: [
+                                      const FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.add),
@@ -552,7 +584,7 @@ class _IntervalCardState extends State<IntervalCard> {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(56.0, 0, 16.0, 12.0),
+            padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
             child: TextFormField(
               controller: _descriptionController,
               decoration: const InputDecoration(

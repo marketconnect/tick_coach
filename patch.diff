@@ -1,0 +1,168 @@
+diff --git a/lib/edit_workout_screen.dart b/lib/edit_workout_screen.dart
+index 0742512..e53008f 100644
+--- a/lib/edit_workout_screen.dart
++++ b/lib/edit_workout_screen.dart
+@@ -10,12 +10,18 @@
+   String? title;
+   String? description;
+   int durationSec;
++  int reps;
++  bool isRepsBased;
+   String? imageUri;
+ 
+   Interval({
+     required this.id,
+     required this.kind,
+     this.title,
+     this.description,
+     required this.durationSec,
++    this.reps = 10,
++    this.isRepsBased = false,
+     this.imageUri,
+   });
+ }
+@@ -193,8 +199,14 @@
+   void _changeDuration(String intervalId, int delta) {
+     setState(() {
+       final interval = _intervals.firstWhere((i) => i.id == intervalId);
+-      interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
++      if (interval.isRepsBased) {
++        final repsDelta = delta > 0 ? 1 : -1;
++        interval.reps = (interval.reps + repsDelta).clamp(0, 1000);
++      } else {
++        interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
++      }
+     });
+   }
+ 
+@@ -207,6 +219,13 @@
+   void _updateIntervalDescription(String id, String description) {
+     setState(() {
+       _intervals.firstWhere((i) => i.id == id).description = description;
++    });
++  }
++
++  void _toggleMetric(String intervalId) {
++    setState(() {
++      final interval = _intervals.firstWhere((i) => i.id == intervalId);
++      interval.isRepsBased = !interval.isRepsBased;
+     });
+   }
+ 
+@@ -420,6 +439,7 @@
+           onDelete: () => _deleteInterval(interval.id),
+           onInsert: _insertIntervals,
+           onDescriptionChanged: (newDescription) =>
+               _updateIntervalDescription(interval.id, newDescription),
++          onToggleMetric: () => _toggleMetric(interval.id),
+         );
+       },
+       onReorder: _onReorder,
+@@ -436,6 +456,7 @@
+   final VoidCallback onDelete;
+   final void Function(int index, List<IntervalKind> kinds) onInsert;
+   final void Function(String newDescription) onDescriptionChanged;
++  final VoidCallback onToggleMetric;
+ 
+   const IntervalCard({
+     super.key,
+@@ -447,6 +468,7 @@
+     required this.onDelete,
+     required this.onInsert,
+     required this.onDescriptionChanged,
++    required this.onToggleMetric,
+   });
+ 
+   @override
+@@ -500,50 +522,67 @@
+           Row(
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
++              Padding(
++                padding: const EdgeInsets.fromLTRB(16.0, 12.0, 0, 12.0),
++                child: Text(
++                  '${widget.index + 1}',
++                  style: theme.textTheme.titleMedium
++                      ?.copyWith(color: theme.disabledColor),
++                ),
++              ),
+               ReorderableDragStartListener(
+                 index: widget.index,
+                 child: Padding(
+-                  padding: const EdgeInsets.fromLTRB(12.0, 12.0, 8.0, 12.0),
++                  padding: const EdgeInsets.fromLTRB(8.0, 12.0, 8.0, 12.0),
+                   child: Icon(Icons.drag_handle, color: theme.disabledColor),
+                 ),
+               ),
+               // _getIntervalIcon(widget.interval.kind, colorScheme),
+-              const SizedBox(width: 12),
+               Expanded(
+                 child: Column(
+-                  crossAxisAlignment: CrossAxisAlignment.start,
++                  crossAxisAlignment: CrossAxisAlignment.center,
+                   children: [
+                     Padding(
+                       padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+                       child: Text(
+                         widget.interval.title ??
+                             widget.interval.kind.name.capitalize(),
+                         style: theme.textTheme.titleMedium,
++                        textAlign: TextAlign.center,
+                       ),
+                     ),
+                     Row(
++                      mainAxisAlignment: MainAxisAlignment.center,
+                       children: [
+                         IconButton(
+                           icon: const Icon(Icons.remove),
+                           onPressed: widget.onDecrement,
+                           tooltip: 'Уменьшить',
+                         ),
+-                        Text(
+-                          widget.formatDuration(widget.interval.durationSec),
+-                          style: theme.textTheme.bodyLarge?.copyWith(
+-                            fontFeatures: [const FontFeature.tabularFigures()],
+-                          ),
++                        TextButton(
++                          onPressed: widget.onToggleMetric,
++                          child: widget.interval.isRepsBased
++                              ? Text(
++                                  '${widget.interval.reps} повт.',
++                                  style: theme.textTheme.bodyLarge,
++                                )
++                              : Text(
++                                  widget.formatDuration(
++                                      widget.interval.durationSec),
++                                  style: theme.textTheme.bodyLarge?.copyWith(
++                                    fontFeatures: [
++                                      const FontFeature.tabularFigures()
++                                    ],
++                                  ),
++                                ),
+                         ),
+                         IconButton(
+                           icon: const Icon(Icons.add),
+                           onPressed: widget.onIncrement,
+                           tooltip: 'Увеличить',
+                         ),
+                       ],
+                     ),
+                   ],
+                 ),
+               ),
+               MenuAnchor(
+@@ -665,12 +704,12 @@
+             ],
+           ),
+           Padding(
+-            padding: const EdgeInsets.fromLTRB(56.0, 0, 16.0, 12.0),
++            padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
+             child: TextFormField(
+               controller: _descriptionController,
+               decoration: const InputDecoration(
+                 isDense: true,
+-                hintText: 'Добавить описание',
++                hintText: 'Описание',
+                 border: InputBorder.none,
+                 contentPadding: EdgeInsets.zero,
+               ),
