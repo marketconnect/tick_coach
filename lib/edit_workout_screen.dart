@@ -291,6 +291,11 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+        scrolledUnderElevation: 2,
+        shadowColor: Colors.black,
+        surfaceTintColor: Colors.transparent,
         title: Text(widget.workout.title),
         actions: [
           TextButton(
@@ -298,10 +303,11 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
             child: Text('Сеты: $_setCount'),
           ),
           IconButton(
-            icon: const Icon(Icons.save),
+            icon: const Icon(Icons.check_sharp),
             tooltip: 'Сохранить',
             onPressed: () => Navigator.of(context).pop(),
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: _buildBody(),

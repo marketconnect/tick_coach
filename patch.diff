@@ -1,65 +1,25 @@
 diff --git a/lib/edit_workout_screen.dart b/lib/edit_workout_screen.dart
-index 8583494..9289255 100644
+index 9289255..a546d12 100644
 --- a/lib/edit_workout_screen.dart
 +++ b/lib/edit_workout_screen.dart
-@@ -470,22 +470,19 @@
-     super.dispose();
-   }
- 
--  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
--  //   switch (kind) {
--  //     case IntervalKind.work:
--  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
--  //     case IntervalKind.rest:
--  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
--  //     case IntervalKind.prepare:
--  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
--
--  //     default:
--  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
--  //   }
--  // }
-+  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
-+    switch (kind) {
-+      case IntervalKind.rest:
-+        return Icon(Icons.self_improvement, color: Colors.green.shade600);
-+      case IntervalKind.prepare:
-+        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
-+      case IntervalKind.between_sets:
-+        return Icon(Icons.more_horiz, color: colorScheme.onSurfaceVariant);
-+      default:
-+        return const SizedBox.shrink();
-+    }
-+  }
- 
-   @override
+@@ -329,15 +329,19 @@
    Widget build(BuildContext context) {
-@@ -501,12 +498,12 @@
-         crossAxisAlignment: CrossAxisAlignment.start,
-         children: [
-           Row(
--            crossAxisAlignment: CrossAxisAlignment.start,
-+            crossAxisAlignment: CrossAxisAlignment.center,
-             children: [
-               ReorderableDragStartListener(
-                 index: widget.index,
-                 child: Padding(
--                  padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
-+                  padding: const EdgeInsets.all(16.0),
-                   child: Icon(Icons.drag_handle, color: theme.disabledColor),
-                 ),
-               ),
-@@ -575,8 +572,12 @@
-                       'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
-                 )
-               else
--                const SizedBox(width: 48),
--
-+                SizedBox(
-+                  width: 48,
-+                  height: 48,
-+                  child: _getIntervalIcon(widget.interval.kind, colorScheme),
-+                ),
-               MenuAnchor(
-                 builder: (context, controller, child) {
-                   return IconButton(
+     return Scaffold(
+       appBar: AppBar(
++        centerTitle: true,
++        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+         title: Text(widget.workout.title),
+         actions: [
+           TextButton(
+             onPressed: _showSetCountDialog,
+             child: Text('Сеты: $_setCount'),
+           ),
+           IconButton(
+             icon: const Icon(Icons.save),
+             tooltip: 'Сохранить',
+             onPressed: () => Navigator.of(context).pop(),
+           ),
++          const SizedBox(width: 8),
+         ],
+       ),
+       body: _buildBody(),
