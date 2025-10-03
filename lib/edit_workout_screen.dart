@@ -368,151 +368,159 @@ class _IntervalCardState extends State<IntervalCard> {
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ReorderableDragStartListener(
-            index: widget.index,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 12.0, right: 8.0),
-              child: Icon(Icons.drag_handle, color: theme.disabledColor),
-            ),
-          ),
-          _getIntervalIcon(widget.interval.kind, colorScheme),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ReorderableDragStartListener(
+                index: widget.index,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12.0, right: 8.0),
+                  child: Icon(Icons.drag_handle, color: theme.disabledColor),
+                ),
+              ),
+              _getIntervalIcon(widget.interval.kind, colorScheme),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12.0),
+                  child: Text(
                     widget.interval.title ??
                         widget.interval.kind.name.capitalize(),
                     style: theme.textTheme.titleMedium,
                   ),
-                  TextFormField(
-                    controller: _descriptionController,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: 'Описание',
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.remove),
-            onPressed: widget.onDecrement,
-            tooltip: 'Уменьшить',
-          ),
-          Text(
-            widget.formatDuration(widget.interval.durationSec),
-            style: theme.textTheme.bodyLarge?.copyWith(
-              fontFeatures: [const FontFeature.tabularFigures()],
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: widget.onIncrement,
-            tooltip: 'Увеличить',
-          ),
-          MenuAnchor(
-            builder: (context, controller, child) {
-              return IconButton(
-                icon: const Icon(Icons.more_vert),
-                tooltip: 'Действия',
-                onPressed: () {
-                  HapticFeedback.selectionClick();
-                  if (controller.isOpen) {
-                    controller.close();
-                  } else {
-                    controller.open();
-                  }
-                },
-              );
-            },
-            menuChildren: [
-              SubmenuButton(
-                menuChildren: [
-                  MenuItemButton(
-                    onPressed: () =>
-                        widget.onInsert(widget.index, [IntervalKind.prepare]),
-                    child: const Text('Подготовка'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () =>
-                        widget.onInsert(widget.index, [IntervalKind.work]),
-                    child: const Text('Работа'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () =>
-                        widget.onInsert(widget.index, [IntervalKind.rest]),
-                    child: const Text('Отдых'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () => widget.onInsert(widget.index, [
-                      IntervalKind.work,
-                      IntervalKind.rest,
-                    ]),
-                    child: const Text('Работа + Отдых'),
-                  ),
-                ],
-                child: const Text('Вставить выше'),
-              ),
-              SubmenuButton(
-                menuChildren: [
-                  MenuItemButton(
-                    onPressed: () => widget.onInsert(widget.index + 1, [
-                      IntervalKind.prepare,
-                    ]),
-                    child: const Text('Подготовка'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () =>
-                        widget.onInsert(widget.index + 1, [IntervalKind.work]),
-                    child: const Text('Работа'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () =>
-                        widget.onInsert(widget.index + 1, [IntervalKind.rest]),
-                    child: const Text('Отдых'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () => widget.onInsert(widget.index + 1, [
-                      IntervalKind.work,
-                      IntervalKind.rest,
-                    ]),
-                    child: const Text('Работа + Отдых'),
-                  ),
-                ],
-                child: const Text('Вставить ниже'),
-              ),
-              MenuItemButton(
-                onPressed: () {
-                  // TODO: Implement duplicate
-                },
-                child: const Text('Копировать'),
-              ),
-              MenuItemButton(
-                onPressed: () {
-                  // TODO: Implement attach image
-                },
-                child: const Text('Добавить фото'),
-              ),
-              const Divider(),
-              MenuItemButton(
-                onPressed: widget.onDelete,
-                child: Text(
-                  'Удалить',
-                  style: TextStyle(color: colorScheme.error),
                 ),
               ),
+              IconButton(
+                icon: const Icon(Icons.remove),
+                onPressed: widget.onDecrement,
+                tooltip: 'Уменьшить',
+              ),
+              Text(
+                widget.formatDuration(widget.interval.durationSec),
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontFeatures: [const FontFeature.tabularFigures()],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                onPressed: widget.onIncrement,
+                tooltip: 'Увеличить',
+              ),
+              MenuAnchor(
+                builder: (context, controller, child) {
+                  return IconButton(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: 'Действия',
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      if (controller.isOpen) {
+                        controller.close();
+                      } else {
+                        controller.open();
+                      }
+                    },
+                  );
+                },
+                menuChildren: [
+                  SubmenuButton(
+                    menuChildren: [
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index, [
+                          IntervalKind.prepare,
+                        ]),
+                        child: const Text('Подготовка'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () =>
+                            widget.onInsert(widget.index, [IntervalKind.work]),
+                        child: const Text('Работа'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () =>
+                            widget.onInsert(widget.index, [IntervalKind.rest]),
+                        child: const Text('Отдых'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index, [
+                          IntervalKind.work,
+                          IntervalKind.rest,
+                        ]),
+                        child: const Text('Работа + Отдых'),
+                      ),
+                    ],
+                    child: const Text('Вставить выше'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: [
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index + 1, [
+                          IntervalKind.prepare,
+                        ]),
+                        child: const Text('Подготовка'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index + 1, [
+                          IntervalKind.work,
+                        ]),
+                        child: const Text('Работа'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index + 1, [
+                          IntervalKind.rest,
+                        ]),
+                        child: const Text('Отдых'),
+                      ),
+                      MenuItemButton(
+                        onPressed: () => widget.onInsert(widget.index + 1, [
+                          IntervalKind.work,
+                          IntervalKind.rest,
+                        ]),
+                        child: const Text('Работа + Отдых'),
+                      ),
+                    ],
+                    child: const Text('Вставить ниже'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () {
+                      // TODO: Implement duplicate
+                    },
+                    child: const Text('Копировать'),
+                  ),
+                  MenuItemButton(
+                    onPressed: () {
+                      // TODO: Implement attach image
+                    },
+                    child: const Text('Добавить фото'),
+                  ),
+                  const Divider(),
+                  MenuItemButton(
+                    onPressed: widget.onDelete,
+                    child: Text(
+                      'Удалить',
+                      style: TextStyle(color: colorScheme.error),
+                    ),
+                  ),
+                ],
+              ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
+            child: TextFormField(
+              controller: _descriptionController,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Описание',
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+              style: theme.textTheme.bodyMedium,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+            ),
           ),
         ],
       ),
