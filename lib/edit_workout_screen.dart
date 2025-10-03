@@ -1,0 +1,284 @@
+import 'package:flutter/material.dart';
+import 'workouts_screen.dart';
+import 'dart:ui';
+
+// Domain models from the spec
+enum IntervalKind {
+  prepare,
+  work,
+  rest,
+  between_sets,
+  calmdown,
+  work_and_rest,
+  custom,
+}
+
+class Interval {
+  String id;
+  IntervalKind kind;
+  String? title;
+  String? description;
+  int durationSec;
+  String? imageUri;
+
+  Interval({
+    required this.id,
+    required this.kind,
+    this.title,
+    this.description,
+    required this.durationSec,
+    this.imageUri,
+  });
+}
+
+class EditWorkoutScreen extends StatefulWidget {
+  final Workout workout;
+
+  const EditWorkoutScreen({super.key, required this.workout});
+
+  @override
+  State<EditWorkoutScreen> createState() => _EditWorkoutScreenState();
+}
+
+class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<Interval> _intervals = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchIntervals();
+  }
+
+  Future<void> _fetchIntervals() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    await Future.delayed(const Duration(milliseconds: 500)); // Simulate loading
+    setState(() {
+      _intervals = [
+        Interval(
+          id: '1',
+          kind: IntervalKind.prepare,
+          durationSec: 10,
+          title: 'Подготовка',
+        ),
+        Interval(
+          id: '2',
+          kind: IntervalKind.work,
+          durationSec: 20,
+          title: 'Упражнение 1',
+        ),
+        Interval(
+          id: '3',
+          kind: IntervalKind.rest,
+          durationSec: 10,
+          title: 'Отдых',
+        ),
+        Interval(
+          id: '4',
+          kind: IntervalKind.work,
+          durationSec: 20,
+          title: 'Упражнение 2',
+        ),
+        Interval(
+          id: '5',
+          kind: IntervalKind.rest,
+          durationSec: 10,
+          title: 'Отдых',
+        ),
+        Interval(
+          id: '6',
+          kind: IntervalKind.calmdown,
+          durationSec: 30,
+          title: 'Заминка',
+        ),
+      ];
+      _isLoading = false;
+    });
+  }
+
+  void _changeDuration(String intervalId, int delta) {
+    setState(() {
+      final interval = _intervals.firstWhere((i) => i.id == intervalId);
+      interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
+    });
+  }
+
+  void _deleteInterval(String intervalId) {
+    setState(() {
+      _intervals.removeWhere((i) => i.id == intervalId);
+    });
+  }
+
+  void _onReorder(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) {
+        newIndex -= 1;
+      }
+      final item = _intervals.removeAt(oldIndex);
+      _intervals.insert(newIndex, item);
+    });
+  }
+
+  String _formatDuration(int totalSeconds) {
+    final duration = Duration(seconds: totalSeconds);
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.workout.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.save),
+            tooltip: 'Сохранить',
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+      body: _buildBody(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          // TODO: Implement FAB menu for appending intervals
+        },
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_errorMessage != null) {
+      return Center(child: Text(_errorMessage!));
+    }
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
+      itemCount: _intervals.length,
+      itemBuilder: (context, index) {
+        final interval = _intervals[index];
+        return IntervalCard(
+          key: ValueKey(interval.id),
+          interval: interval,
+          index: index,
+          formatDuration: _formatDuration,
+          onDecrement: () => _changeDuration(interval.id, -5),
+          onIncrement: () => _changeDuration(interval.id, 5),
+          onDelete: () => _deleteInterval(interval.id),
+        );
+      },
+      onReorder: _onReorder,
+    );
+  }
+}
+
+class IntervalCard extends StatelessWidget {
+  final Interval interval;
+  final int index;
+  final String Function(int) formatDuration;
+  final VoidCallback onIncrement;
+  final VoidCallback onDecrement;
+  final VoidCallback onDelete;
+
+  const IntervalCard({
+    super.key,
+    required this.interval,
+    required this.index,
+    required this.formatDuration,
+    required this.onIncrement,
+    required this.onDecrement,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          ReorderableDragStartListener(
+            index: index,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12.0),
+              child: Icon(Icons.drag_handle),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              interval.title ?? interval.kind.name.capitalize(),
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.remove),
+            onPressed: onDecrement,
+            tooltip: 'Уменьшить',
+          ),
+          Text(
+            formatDuration(interval.durationSec),
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontFeatures: [const FontFeature.tabularFigures()],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: onIncrement,
+            tooltip: 'Увеличить',
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'delete') {
+                onDelete();
+              }
+              // Other actions can be handled here
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'insert_above',
+                child: Text('Вставить выше'),
+              ),
+              const PopupMenuItem(
+                value: 'insert_below',
+                child: Text('Вставить ниже'),
+              ),
+              const PopupMenuItem(
+                value: 'duplicate',
+                child: Text('Копировать'),
+              ),
+              const PopupMenuItem(
+                value: 'attach_image',
+                child: Text('Добавить фото'),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(
+                  'Удалить',
+                  style: TextStyle(color: colorScheme.error),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+extension StringExtension on String {
+  String capitalize() {
+    return "${this[0].toUpperCase()}${substring(1)}";
+  }
+}

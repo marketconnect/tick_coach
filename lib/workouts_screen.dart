@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
+import 'edit_workout_screen.dart';
 import 'agent_entry.dart';
 
 // Data model based on <entity id="Workout">
@@ -255,7 +255,17 @@ class WorkoutCard extends StatelessWidget {
                       PopupMenuButton<String>(
                         tooltip: 'Дополнительные действия',
                         onSelected: (value) {
-                          /* Handle menu selection */
+                          switch (value) {
+                            case 'edit':
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      EditWorkoutScreen(workout: workout),
+                                ),
+                              );
+                              break;
+                            // Handle other cases
+                          }
                         },
                         itemBuilder: (BuildContext context) =>
                             <PopupMenuEntry<String>>[
