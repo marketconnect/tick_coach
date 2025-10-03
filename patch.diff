@@ -1,34 +1,40 @@
 diff --git a/lib/edit_workout_screen.dart b/lib/edit_workout_screen.dart
-index 835105d..8583494 100644
+index 8583494..9289255 100644
 --- a/lib/edit_workout_screen.dart
 +++ b/lib/edit_workout_screen.dart
-@@ -410,6 +410,14 @@
-           onToggleMetric: () => _toggleMetric(interval.id),
-           onEditValue: () => _showEditValueDialog(interval),
-         );
-       },
-       onReorder: _onReorder,
-+      proxyDecorator: (Widget child, int index, Animation<double> animation) {
-+        return Material(
-+          elevation: 4.0,
-+          color: Colors.transparent,
-+          child: child,
-+        );
-+      },
-     );
+@@ -470,22 +470,19 @@
+     super.dispose();
    }
- }
-@@ -477,22 +485,26 @@
-   Widget build(BuildContext context) {
-     final theme = Theme.of(context);
-     final colorScheme = theme.colorScheme;
-+    final isWorkInterval = widget.interval.kind == IntervalKind.work;
-+    final isReps = isWorkInterval && widget.interval.isRepsBased;
  
-     return Card(
-       margin: const EdgeInsets.symmetric(vertical: 4),
-+      color: isWorkInterval ? colorScheme.surfaceContainerLow : null,
-       child: Column(
+-  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
+-  //   switch (kind) {
+-  //     case IntervalKind.work:
+-  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
+-  //     case IntervalKind.rest:
+-  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
+-  //     case IntervalKind.prepare:
+-  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
+-
+-  //     default:
+-  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
+-  //   }
+-  // }
++  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
++    switch (kind) {
++      case IntervalKind.rest:
++        return Icon(Icons.self_improvement, color: Colors.green.shade600);
++      case IntervalKind.prepare:
++        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
++      case IntervalKind.between_sets:
++        return Icon(Icons.more_horiz, color: colorScheme.onSurfaceVariant);
++      default:
++        return const SizedBox.shrink();
++    }
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -501,12 +498,12 @@
          crossAxisAlignment: CrossAxisAlignment.start,
          children: [
            Row(
@@ -38,51 +44,22 @@ index 835105d..8583494 100644
                ReorderableDragStartListener(
                  index: widget.index,
                  child: Padding(
--                  padding: const EdgeInsets.fromLTRB(8.0, 12.0, 8.0, 12.0),
-+                  padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
+-                  padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
++                  padding: const EdgeInsets.all(16.0),
                    child: Icon(Icons.drag_handle, color: theme.disabledColor),
                  ),
                ),
- 
-               // _getIntervalIcon(widget.interval.kind, colorScheme),
-               Expanded(
-@@ -518,7 +530,7 @@
-                         ),
-                         TextButton(
-                           onPressed: widget.onEditValue,
--                          child: widget.interval.isRepsBased
-+                          child: isReps
-                               ? Text(
-                                   '${widget.interval.reps} повт.',
-                                   style: theme.textTheme.bodyLarge,
-@@ -545,17 +557,20 @@
-                   ],
-                 ),
-               ),
--              IconButton(
--                icon: Icon(
--                  widget.interval.isRepsBased
--                      ? Icons.repeat
--                      : Icons.timer_outlined,
-+              if (isWorkInterval)
-+                IconButton(
-+                  icon: Icon(
-+                    widget.interval.isRepsBased
-+                        ? Icons.repeat
-+                        : Icons.timer_outlined,
-+                  ),
-+                  onPressed: widget.onToggleMetric,
-+                  tooltip:
-+                      'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
-+                )
-+              else
-+                const SizedBox(
+@@ -575,8 +572,12 @@
+                       'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
+                 )
+               else
+-                const SizedBox(width: 48),
+-
++                SizedBox(
 +                  width: 48,
-                 ),
--                onPressed: widget.onToggleMetric,
--                tooltip:
--                    'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
--              ),
++                  height: 48,
++                  child: _getIntervalIcon(widget.interval.kind, colorScheme),
++                ),
                MenuAnchor(
                  builder: (context, controller, child) {
                    return IconButton(

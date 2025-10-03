@@ -461,17 +461,19 @@ class _IntervalCardState extends State<IntervalCard> {
     super.dispose();
   }
 
-  Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
-    switch (kind) {
-      case IntervalKind.rest:
-        return Icon(Icons.self_improvement, color: Colors.green.shade600);
-      case IntervalKind.prepare:
-        return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
+  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
+  //   switch (kind) {
+  //     case IntervalKind.work:
+  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
+  //     case IntervalKind.rest:
+  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
+  //     case IntervalKind.prepare:
+  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
 
-      default:
-        return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
-    }
-  }
+  //     default:
+  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
