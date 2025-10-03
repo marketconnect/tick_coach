@@ -4,15 +4,7 @@ import 'dart:ui';
 import 'package:flutter/services.dart';
 
 // Domain models from the spec
-enum IntervalKind {
-  prepare,
-  work,
-  rest,
-  between_sets,
-  calmdown,
-  work_and_rest,
-  custom,
-}
+enum IntervalKind { prepare, work, rest, between_sets, work_and_rest, custom }
 
 class Interval {
   String id;
@@ -45,6 +37,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   List<Interval> _intervals = [];
+  int _setCount = 1;
   int _nextId = 100;
   final _scrollController = ScrollController();
 
@@ -79,6 +72,10 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           case IntervalKind.rest:
             title = 'Отдых';
             duration = 15;
+            break;
+          case IntervalKind.between_sets:
+            title = 'Отдых между сетами';
+            duration = 60;
             break;
           default:
             title = kind.name.capitalize();
@@ -126,7 +123,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           id: '2',
           kind: IntervalKind.work,
           durationSec: 20,
-          title: 'Упражнение 1',
+          title: 'Работа',
           description: 'Например: Отжимания 15 раз',
         ),
         Interval(
@@ -139,19 +136,13 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           id: '4',
           kind: IntervalKind.work,
           durationSec: 20,
-          title: 'Упражнение 2',
+          title: 'Работа',
         ),
         Interval(
           id: '5',
           kind: IntervalKind.rest,
           durationSec: 10,
           title: 'Отдых',
-        ),
-        Interval(
-          id: '6',
-          kind: IntervalKind.calmdown,
-          durationSec: 30,
-          title: 'Заминка',
         ),
       ];
       _isLoading = false;
@@ -195,12 +186,49 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     return '$minutes:$seconds';
   }
 
+  Future<void> _showSetCountDialog() async {
+    final controller = TextEditingController(text: _setCount.toString());
+    final newCountStr = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Количество сетов'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(labelText: 'Укажите количество'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (newCountStr != null) {
+      final newCount = int.tryParse(newCountStr);
+      if (newCount != null && newCount > 0) {
+        setState(() => _setCount = newCount);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.workout.title),
         actions: [
+          TextButton(
+            onPressed: _showSetCountDialog,
+            child: Text('Сеты: $_setCount'),
+          ),
           IconButton(
             icon: const Icon(Icons.save),
             tooltip: 'Сохранить',
@@ -253,6 +281,14 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
               _insertIntervals(_intervals.length, [IntervalKind.rest]);
             },
             child: const Text('Отдых'),
+          ),
+
+          MenuItemButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [IntervalKind.between_sets]);
+            },
+            child: const Text('Отдых между сетами'),
           ),
           MenuItemButton(
             onPressed: () {
@@ -354,8 +390,7 @@ class _IntervalCardState extends State<IntervalCard> {
         return Icon(Icons.self_improvement, color: Colors.green.shade600);
       case IntervalKind.prepare:
         return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
-      case IntervalKind.calmdown:
-        return Icon(Icons.spa_outlined, color: Colors.blue.shade600);
+
       default:
         return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
     }
@@ -372,42 +407,51 @@ class _IntervalCardState extends State<IntervalCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ReorderableDragStartListener(
                 index: widget.index,
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 12.0, right: 8.0),
+                  padding: const EdgeInsets.fromLTRB(12.0, 12.0, 8.0, 12.0),
                   child: Icon(Icons.drag_handle, color: theme.disabledColor),
                 ),
               ),
-              _getIntervalIcon(widget.interval.kind, colorScheme),
+              // _getIntervalIcon(widget.interval.kind, colorScheme),
               const SizedBox(width: 12),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12.0),
-                  child: Text(
-                    widget.interval.title ??
-                        widget.interval.kind.name.capitalize(),
-                    style: theme.textTheme.titleMedium,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+                      child: Text(
+                        widget.interval.title ??
+                            widget.interval.kind.name.capitalize(),
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove),
+                          onPressed: widget.onDecrement,
+                          tooltip: 'Уменьшить',
+                        ),
+                        Text(
+                          widget.formatDuration(widget.interval.durationSec),
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontFeatures: [const FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add),
+                          onPressed: widget.onIncrement,
+                          tooltip: 'Увеличить',
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.remove),
-                onPressed: widget.onDecrement,
-                tooltip: 'Уменьшить',
-              ),
-              Text(
-                widget.formatDuration(widget.interval.durationSec),
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontFeatures: [const FontFeature.tabularFigures()],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: widget.onIncrement,
-                tooltip: 'Увеличить',
               ),
               MenuAnchor(
                 builder: (context, controller, child) {
@@ -508,12 +552,12 @@ class _IntervalCardState extends State<IntervalCard> {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
+            padding: const EdgeInsets.fromLTRB(56.0, 0, 16.0, 12.0),
             child: TextFormField(
               controller: _descriptionController,
               decoration: const InputDecoration(
                 isDense: true,
-                hintText: 'Описание',
+                hintText: 'Добавить описание',
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.zero,
               ),
