@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'database_helper.dart';
 import 'dart:math';
+import 'package:flutter/gestures.dart';
 
 // Domain models from the spec
 enum IntervalKind { prepare, work, rest, between_sets, work_and_rest, custom }
@@ -232,9 +233,13 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   }
 
   void _updateIntervalDescription(String id, String description) {
-    setState(() {
-      _intervals.firstWhere((i) => i.id == id).description = description;
-    });
+    // setState(() {
+    //   _intervals.firstWhere((i) => i.id == id).description = description;
+    // });
+    // Не перерисовываем весь список на каждый символ —
+    // TextField уже показывает ввод через свой controller.
+    final interval = _intervals.firstWhere((i) => i.id == id);
+    interval.description = description;
   }
 
   void _toggleMetric(String intervalId) {
@@ -436,6 +441,9 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     return ReorderableListView.builder(
       scrollController: _scrollController,
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
+      buildDefaultDragHandles: false, // перетаскивание только за ручку
+      dragStartBehavior: DragStartBehavior.down, // отзывчивее старт драга
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       itemCount: _intervals.length,
       itemBuilder: (context, index) {
         final interval = _intervals[index];
@@ -444,14 +452,14 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           interval: interval,
           index: index,
           formatDuration: _formatDuration,
-          onDecrement: () => _changeDuration(interval.id, -5),
-          onIncrement: () => _changeDuration(interval.id, 5),
+          onDecrement: () => _changeDuration(interval.id, -1),
+          onIncrement: () => _changeDuration(interval.id, 1),
           onDelete: () => _deleteInterval(interval.id),
           onInsert: _insertIntervals,
           onDescriptionChanged: (newDescription) =>
               _updateIntervalDescription(interval.id, newDescription),
           onToggleMetric: () => _toggleMetric(interval.id),
-          onEditValue: () => _showEditValueDialog(interval),
+          onEditValue: () {}, // диалог больше не нужен
         );
       },
       onReorder: _onReorder,
@@ -497,6 +505,9 @@ class IntervalCard extends StatefulWidget {
 
 class _IntervalCardState extends State<IntervalCard> {
   late final TextEditingController _descriptionController;
+  late final TextEditingController _valueController; // для секунд/повторений
+  bool _dragPressed =
+      false; // визуальная подсветка при нажатии на ручку перетаскивания
 
   @override
   void initState() {
@@ -504,15 +515,79 @@ class _IntervalCardState extends State<IntervalCard> {
     _descriptionController = TextEditingController(
       text: widget.interval.description,
     );
-    _descriptionController.addListener(() {
-      widget.onDescriptionChanged(_descriptionController.text);
-    });
+    _valueController = TextEditingController(
+      text:
+          (widget.interval.kind == IntervalKind.work &&
+              widget.interval.isRepsBased)
+          ? widget.interval.reps.toString()
+          : widget.interval.durationSec.toString(),
+    );
+
+    // _descriptionController.addListener(() {
+    //   widget.onDescriptionChanged(_descriptionController.text);
+    // });
   }
 
   @override
   void dispose() {
     _descriptionController.dispose();
+    _valueController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant IntervalCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Синхронизируем поле, если значение поменяли +/- или переключили метрику
+    final isReps =
+        widget.interval.kind == IntervalKind.work &&
+        widget.interval.isRepsBased;
+    final newText = isReps
+        ? widget.interval.reps.toString()
+        : widget.interval.durationSec.toString();
+    if (_valueController.text != newText) {
+      _valueController.text = newText;
+    }
+  }
+
+  Future<void> _showDescriptionDialog() async {
+    final controller = TextEditingController(text: _descriptionController.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Описание интервала'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: null,
+            textInputAction: TextInputAction.newline,
+            decoration: const InputDecoration(
+              labelText: 'Добавить описание',
+              hintText: 'Например: Отжимания 15 раз',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).pop(controller.text);
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result != null) {
+      _descriptionController.text = result;
+      widget.onDescriptionChanged(result);
+      setState(() {}); // обновим превью текста на карточке
+    }
   }
 
   // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
@@ -535,9 +610,13 @@ class _IntervalCardState extends State<IntervalCard> {
     final colorScheme = theme.colorScheme;
     final isWorkInterval = widget.interval.kind == IntervalKind.work;
     final isReps = isWorkInterval && widget.interval.isRepsBased;
+    final Color? _baseColor = isWorkInterval
+        ? colorScheme.surfaceContainerLow
+        : null;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      color: isWorkInterval ? colorScheme.surfaceContainerLow : null,
+      // Подсветка карты во время нажатия на drag-handle
+      color: _dragPressed ? colorScheme.secondaryContainer : _baseColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -548,7 +627,16 @@ class _IntervalCardState extends State<IntervalCard> {
                 index: widget.index,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
-                  child: Icon(Icons.drag_handle, color: theme.disabledColor),
+                  child: Listener(
+                    onPointerDown: (_) {
+                      setState(() => _dragPressed = true);
+                      HapticFeedback.selectionClick();
+                    },
+                    onPointerCancel: (_) =>
+                        setState(() => _dragPressed = false),
+                    onPointerUp: (_) => setState(() => _dragPressed = false),
+                    child: Icon(Icons.drag_handle, color: theme.disabledColor),
+                  ),
                 ),
               ),
 
@@ -574,23 +662,33 @@ class _IntervalCardState extends State<IntervalCard> {
                           onPressed: widget.onDecrement,
                           tooltip: 'Уменьшить',
                         ),
-                        TextButton(
-                          onPressed: widget.onEditValue,
-                          child: isReps
-                              ? Text(
-                                  '${widget.interval.reps} повт.',
-                                  style: theme.textTheme.bodyLarge,
-                                )
-                              : Text(
-                                  widget.formatDuration(
-                                    widget.interval.durationSec,
-                                  ),
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    fontFeatures: [
-                                      const FontFeature.tabularFigures(),
-                                    ],
-                                  ),
-                                ),
+                        SizedBox(
+                          width: 96,
+                          child: TextField(
+                            controller: _valueController,
+                            textAlign: TextAlign.center,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              border: InputBorder.none,
+                              hintText: '0',
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                            style: theme.textTheme.bodyLarge,
+                            // Обновляем модель по вводу (секунды/повторения как число)
+                            onChanged: (txt) {
+                              final v = int.tryParse(txt) ?? 0;
+                              if (isReps) {
+                                widget.interval.reps = v.clamp(0, 1000);
+                              } else {
+                                widget.interval.durationSec = v.clamp(0, 86400);
+                              }
+                              setState(() {}); // для мгновенной отрисовки
+                            },
+                          ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.add),
@@ -716,17 +814,30 @@ class _IntervalCardState extends State<IntervalCard> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
-            child: TextFormField(
-              controller: _descriptionController,
-              decoration: const InputDecoration(
-                isDense: true,
-                hintText: 'Добавить описание',
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
+            child: Semantics(
+              button: true,
+              label: 'Добавить или изменить описание интервала',
+              onTapHint: 'Открыть диалог редактирования',
+              child: InkWell(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  _showDescriptionDialog();
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    (_descriptionController.text.isEmpty)
+                        ? 'Добавить описание'
+                        : _descriptionController.text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: (_descriptionController.text.isEmpty)
+                          ? theme.hintColor
+                          : null,
+                    ),
+                  ),
+                ),
               ),
-              style: theme.textTheme.bodyMedium,
-              maxLines: null,
-              keyboardType: TextInputType.multiline,
             ),
           ),
         ],
