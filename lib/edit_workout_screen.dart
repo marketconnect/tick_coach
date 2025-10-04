@@ -47,10 +47,11 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   int _setCount = 1;
   int _nextId = 0;
   final _scrollController = ScrollController();
-
+  late String _title;
   @override
   void initState() {
     super.initState();
+    _title = widget.workout.title;
     _fetchIntervals();
   }
 
@@ -58,6 +59,41 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _showEditTitleDialog() async {
+    final controller = TextEditingController(text: _title);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Название тренировки'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Введите название',
+            hintText: 'Например: Грудь и плечи',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).pop(controller.text.trim());
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      setState(() => _title = result);
+    }
   }
 
   void _insertIntervals(int index, List<IntervalKind> kinds) {
@@ -349,7 +385,25 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
         scrolledUnderElevation: 2,
         shadowColor: Colors.black,
         surfaceTintColor: Colors.transparent,
-        title: Text(widget.workout.title),
+        title: Semantics(
+          button: true,
+          label: 'Название тренировки: $_title',
+          onTapHint: 'Редактировать название',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _showEditTitleDialog();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: 6.0,
+                horizontal: 8.0,
+              ),
+              child: Text(_title),
+            ),
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: _showSetCountDialog,
@@ -590,26 +644,13 @@ class _IntervalCardState extends State<IntervalCard> {
     }
   }
 
-  // Widget _getIntervalIcon(IntervalKind kind, ColorScheme colorScheme) {
-  //   switch (kind) {
-  //     case IntervalKind.work:
-  //       return Icon(Icons.fitness_center, color: colorScheme.primary);
-  //     case IntervalKind.rest:
-  //       return Icon(Icons.self_improvement, color: Colors.green.shade600);
-  //     case IntervalKind.prepare:
-  //       return Icon(Icons.timer_outlined, color: colorScheme.tertiary);
-
-  //     default:
-  //       return Icon(Icons.hourglass_empty, color: colorScheme.onSurfaceVariant);
-  //   }
-  // }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isWorkInterval = widget.interval.kind == IntervalKind.work;
     final isReps = isWorkInterval && widget.interval.isRepsBased;
+    final unitLabel = isReps ? 'повт.' : 'сек.';
     final Color? _baseColor = isWorkInterval
         ? colorScheme.surfaceContainerLow
         : null;
@@ -662,32 +703,43 @@ class _IntervalCardState extends State<IntervalCard> {
                           onPressed: widget.onDecrement,
                           tooltip: 'Уменьшить',
                         ),
-                        SizedBox(
-                          width: 96,
-                          child: TextField(
-                            controller: _valueController,
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: InputBorder.none,
-                              hintText: '0',
-                              contentPadding: EdgeInsets.zero,
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              minWidth: 72,
+                              maxWidth: 140,
                             ),
-                            style: theme.textTheme.bodyLarge,
-                            // Обновляем модель по вводу (секунды/повторения как число)
-                            onChanged: (txt) {
-                              final v = int.tryParse(txt) ?? 0;
-                              if (isReps) {
-                                widget.interval.reps = v.clamp(0, 1000);
-                              } else {
-                                widget.interval.durationSec = v.clamp(0, 86400);
-                              }
-                              setState(() {}); // для мгновенной отрисовки
-                            },
+                            child: TextField(
+                              controller: _valueController,
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              decoration: InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                                hintText: '0',
+                                contentPadding: EdgeInsets.zero,
+                                // единица измерения внутри поля
+                                suffixText: unitLabel,
+                                suffixStyle: theme.textTheme.bodyLarge,
+                              ),
+                              style: theme.textTheme.bodyLarge,
+                              // Обновляем модель по вводу (секунды/повторения как число)
+                              onChanged: (txt) {
+                                final v = int.tryParse(txt) ?? 0;
+                                if (isReps) {
+                                  widget.interval.reps = v.clamp(0, 1000);
+                                } else {
+                                  widget.interval.durationSec = v.clamp(
+                                    0,
+                                    86400,
+                                  );
+                                }
+                                setState(() {}); // мгновенная отрисовка
+                              },
+                            ),
                           ),
                         ),
                         IconButton(
