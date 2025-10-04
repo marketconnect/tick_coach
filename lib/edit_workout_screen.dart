@@ -412,19 +412,19 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
           MenuItemButton(
             onPressed: () {
               HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [IntervalKind.between_sets]);
-            },
-            child: const Text('Отдых между сетами'),
-          ),
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
               _insertIntervals(_intervals.length, [
                 IntervalKind.work,
                 IntervalKind.rest,
               ]);
             },
             child: const Text('Работа + Отдых'),
+          ),
+          MenuItemButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _insertIntervals(_intervals.length, [IntervalKind.between_sets]);
+            },
+            child: const Text('Отдых между сетами'),
           ),
         ],
       ),
