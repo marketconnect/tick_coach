@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
 import 'agent_entry.dart';
+import '../utils/database_helper.dart';
 
 // Data model based on <entity id="Workout">
 class Workout {
@@ -50,48 +51,52 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     _fetchWorkouts();
   }
 
-  // Mock implementation of <effect id="load_workouts">
   Future<void> _fetchWorkouts() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      // Simulate network delay
-      await Future.delayed(const Duration(seconds: 1));
-      // Mock data
+      final dbHelper = DatabaseHelper.instance;
+      final workoutsData = await dbHelper.getAllWorkouts();
+      final List<Workout> loadedWorkouts = [];
+      for (final workoutMap in workoutsData) {
+        final workoutId = workoutMap['id'] as String;
+        final intervals = await dbHelper.getIntervalsForWorkout(workoutId);
+        final setCount = await dbHelper.getSetCountForWorkout(workoutId);
+        if (intervals.isNotEmpty) {
+          final totalDurationInSeconds =
+              intervals.fold<int>(0, (sum, item) => sum + item.durationSec) *
+              setCount;
+          final distinctDescriptions = intervals
+              .map((i) => i.description)
+              .where((d) => d != null && d.isNotEmpty)
+              .toSet()
+              .toList();
+          final previewLines = distinctDescriptions
+              .take(3)
+              .map((d) => d!)
+              .toList();
+          if (distinctDescriptions.length > 3) {
+            previewLines.add('...');
+          }
+          loadedWorkouts.add(
+            Workout(
+              id: workoutId,
+              title: workoutMap['title'] as String,
+              previewLines: previewLines.isEmpty
+                  ? ['Нет описания']
+                  : previewLines,
+              totalTime: Duration(seconds: totalDurationInSeconds),
+              intervalsCount: intervals.length * setCount,
+              repeats: setCount,
+            ),
+          );
+        }
+      }
+      if (!mounted) return;
       setState(() {
-        _workouts = [
-          const Workout(
-            id: '1',
-            title: 'Табата 4 мин',
-            previewLines: ['20с работа', '10с отдых', '8 раундов'],
-            totalTime: Duration(minutes: 4),
-            intervalsCount: 16,
-            repeats: 1,
-            hasSettings: true,
-          ),
-          const Workout(
-            id: '2',
-            title: 'Дыхание 4-7-8',
-            previewLines: ['Вдох: 4с', 'Задержка: 7с', 'Выдох: 8с'],
-            totalTime: Duration(minutes: 5, seconds: 45),
-            intervalsCount: 20,
-            hasNotes: true,
-          ),
-          const Workout(
-            id: '3',
-            title: 'Интервальный бег',
-            previewLines: [
-              '5 мин разминка',
-              '3 мин быстрый бег',
-              '2 мин ходьба',
-              '...',
-            ],
-            totalTime: Duration(minutes: 30),
-            intervalsCount: 8,
-          ),
-        ];
+        _workouts = loadedWorkouts;
         _isLoading = false;
       });
     } catch (e) {

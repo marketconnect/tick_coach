@@ -136,51 +136,11 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       );
       final setCount = await dbHelper.getSetCountForWorkout(widget.workout.id);
       if (!mounted) return;
-      if (intervals.isEmpty) {
-        setState(() {
-          _intervals = [
-            Interval(
-              id: '1',
-              kind: IntervalKind.prepare,
-              durationSec: 10,
-              title: 'Подготовка',
-            ),
-            Interval(
-              id: '2',
-              kind: IntervalKind.work,
-              durationSec: 20,
-              title: 'Работа',
-              description: 'Например: Отжимания 15 раз',
-            ),
-            Interval(
-              id: '3',
-              kind: IntervalKind.rest,
-              durationSec: 10,
-              title: 'Отдых',
-            ),
-            Interval(
-              id: '4',
-              kind: IntervalKind.work,
-              durationSec: 20,
-              title: 'Работа',
-            ),
-            Interval(
-              id: '5',
-              kind: IntervalKind.rest,
-              durationSec: 10,
-              title: 'Отдых',
-            ),
-          ];
-          _setCount = 1;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _intervals = intervals;
-          _setCount = setCount;
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _intervals = intervals;
+        _setCount = setCount;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {

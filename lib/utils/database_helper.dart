@@ -5,6 +5,7 @@ import 'package:tick_coach/domain/models/interval.dart'
     show Interval, IntervalKind;
 // For Interval and IntervalKind
 import '../presentation/workouts_screen.dart'; // For Workout
+import 'dart:math';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -22,7 +23,125 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) async {
+        await _createDB(db, version);
+        await _createDefaultWorkouts(db);
+      },
+    );
+  }
+
+  Future<void> _createDefaultWorkouts(Database db) async {
+    String newId() =>
+        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+    await db.transaction((txn) async {
+      // Workout 1: Разминка
+      final workout1Id = 'default_warmup';
+      await txn.insert('workouts', {
+        'id': workout1Id,
+        'title': 'Разминка',
+        'set_count': 1,
+      });
+      final warmupIntervals = [
+        Interval(
+          id: newId(),
+          kind: IntervalKind.work,
+          durationSec: 30,
+          title: 'Работа',
+          description:
+              'круговые движения суставов (шея, плечи, таз, колени, голеностоп)',
+        ),
+        Interval(
+          id: newId(),
+          kind: IntervalKind.work,
+          durationSec: 60,
+          title: 'Работа',
+          description: 'шаг и присед к стулу (частичная амплитуда)',
+        ),
+        Interval(
+          id: newId(),
+          kind: IntervalKind.work,
+          durationSec: 60,
+          title: 'Работа',
+          description: 'выпады назад попеременно (медленно)',
+        ),
+        Interval(
+          id: newId(),
+          kind: IntervalKind.work,
+          durationSec: 30,
+          title: 'Работа',
+          description: 'лёгкие прыжки на месте или марш на месте',
+        ),
+      ];
+      for (int i = 0; i < warmupIntervals.length; i++) {
+        final interval = warmupIntervals[i];
+        await txn.insert('intervals', {
+          'id': interval.id,
+          'workout_id': workout1Id,
+          'kind': interval.kind.name,
+          'title': interval.title,
+          'description': interval.description,
+          'duration_sec': interval.durationSec,
+          'reps': interval.reps,
+          'is_reps_based': interval.isRepsBased ? 1 : 0,
+          'image_uri': interval.imageUri,
+          'sort_order': i,
+        });
+      }
+      // Workout 2: Тренировка
+      final workout2Id = 'default_tabata';
+      await txn.insert('workouts', {
+        'id': workout2Id,
+        'title': 'Тренировка',
+        'set_count': 1,
+      });
+      List<Interval> tabataIntervals = [];
+      final tabataDescriptions = [
+        'Планка на прямых руках',
+        'Шаги на месте с высоким подъемом бедра',
+        'Скручивания на пресс',
+        'Глубокие приседания',
+      ];
+      for (int i = 0; i < tabataDescriptions.length; i++) {
+        for (int j = 0; j < 8; j++) {
+          tabataIntervals.add(
+            Interval(
+              id: newId(),
+              kind: IntervalKind.work,
+              durationSec: 20,
+              title: 'Работа',
+              description: tabataDescriptions[i],
+            ),
+          );
+          tabataIntervals.add(
+            Interval(
+              id: newId(),
+              kind: IntervalKind.rest,
+              durationSec: 10,
+              title: 'Отдых',
+            ),
+          );
+        }
+        if (i < tabataDescriptions.length - 1) {
+          tabataIntervals.removeLast();
+          tabataIntervals.add(
+            Interval(
+              id: newId(),
+              kind: IntervalKind.between_sets,
+              durationSec: 60,
+              title: 'Отдых между сетами',
+            ),
+          );
+        }
+      }
+      tabataIntervals.removeLast();
+      for (int i = 0; i < tabataIntervals.length; i++) {
+        final interval = tabataIntervals[i];
+        await txn.insert('intervals', _intervalToMap(interval, workout2Id, i));
+      }
+    });
   }
 
   Future _createDB(Database db, int version) async {
@@ -76,22 +195,27 @@ class DatabaseHelper {
       // Insert new intervals
       for (int i = 0; i < intervals.length; i++) {
         final interval = intervals[i];
-        await txn.insert('intervals', {
-          'id': interval.id,
-          'workout_id': workout.id,
-          'kind': interval.kind.name,
-          'title': interval.title,
-          'description': interval.description,
-          'duration_sec': interval.durationSec,
-          'reps': interval.reps,
-          'is_reps_based': interval.isRepsBased ? 1 : 0,
-          'image_uri': interval.imageUri,
-          'sort_order': i,
-        });
+        await txn.insert('intervals', _intervalToMap(interval, workout.id, i));
       }
     });
   }
 
+  Map<String, dynamic> _intervalToMap(
+    Interval interval,
+    String workoutId,
+    int order,
+  ) => {
+    'id': interval.id,
+    'workout_id': workoutId,
+    'kind': interval.kind.name,
+    'title': interval.title,
+    'description': interval.description,
+    'duration_sec': interval.durationSec,
+    'reps': interval.reps,
+    'is_reps_based': interval.isRepsBased ? 1 : 0,
+    'image_uri': interval.imageUri,
+    'sort_order': order,
+  };
   Future<List<Interval>> getIntervalsForWorkout(String workoutId) async {
     final db = await instance.database;
     final maps = await db.query(
@@ -135,5 +259,10 @@ class DatabaseHelper {
     } else {
       return 1; // Default value
     }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllWorkouts() async {
+    final db = await instance.database;
+    return await db.query('workouts', orderBy: 'title');
   }
 }
