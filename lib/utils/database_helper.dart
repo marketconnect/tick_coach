@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'edit_workout_screen.dart'; // For Interval and IntervalKind
-import 'workouts_screen.dart'; // For Workout
+import 'package:tick_coach/domain/models/interval.dart'
+    show Interval, IntervalKind;
+// For Interval and IntervalKind
+import '../presentation/workouts_screen.dart'; // For Workout
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();

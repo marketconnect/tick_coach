@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'edit_workout_screen.dart';
+import 'workout_timer_screen.dart';
 import 'agent_entry.dart';
 
 // Data model based on <entity id="Workout">
@@ -249,7 +250,12 @@ class WorkoutCard extends StatelessWidget {
                         icon: const Icon(Icons.play_arrow),
                         tooltip: 'Запустить тренировку',
                         onPressed: () {
-                          /* StartWorkout(workout.id) */
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  WorkoutTimerScreen(workout: workout),
+                            ),
+                          );
                         },
                       ),
                       PopupMenuButton<String>(

@@ -1,35 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Interval;
+import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
+import 'package:tick_coach/domain/models/interval.dart' show Interval;
 import 'workouts_screen.dart';
-import 'dart:ui';
 import 'package:flutter/services.dart';
-import 'database_helper.dart';
+import '../utils/database_helper.dart';
 import 'dart:math';
 import 'package:flutter/gestures.dart';
-
-// Domain models from the spec
-enum IntervalKind { prepare, work, rest, between_sets, work_and_rest, custom }
-
-class Interval {
-  String id;
-  IntervalKind kind;
-  String? title;
-  String? description;
-  int durationSec;
-  int reps;
-  bool isRepsBased;
-  String? imageUri;
-
-  Interval({
-    required this.id,
-    required this.kind,
-    this.title,
-    this.description,
-    required this.durationSec,
-    this.reps = 10,
-    this.isRepsBased = false,
-    this.imageUri,
-  });
-}
 
 class EditWorkoutScreen extends StatefulWidget {
   final Workout workout;
@@ -45,7 +21,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   String? _errorMessage;
   List<Interval> _intervals = [];
   int _setCount = 1;
-  int _nextId = 0;
   final _scrollController = ScrollController();
   late String _title;
   @override
@@ -100,7 +75,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     final isAppending = index >= _intervals.length;
     setState(() {
       final newIntervals = kinds.map((kind) {
-        _nextId++;
         final newId =
             '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
         String title;
@@ -251,17 +225,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     });
   }
 
-  void _updateIntervalValue(String intervalId, int newValue) {
-    setState(() {
-      final interval = _intervals.firstWhere((i) => i.id == intervalId);
-      if (interval.isRepsBased) {
-        interval.reps = newValue.clamp(0, 1000);
-      } else {
-        interval.durationSec = newValue.clamp(0, 86400);
-      }
-    });
-  }
-
   void _deleteInterval(String intervalId) {
     setState(() {
       _intervals.removeWhere((i) => i.id == intervalId);
@@ -269,11 +232,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   }
 
   void _updateIntervalDescription(String id, String description) {
-    // setState(() {
-    //   _intervals.firstWhere((i) => i.id == id).description = description;
-    // });
-    // Не перерисовываем весь список на каждый символ —
-    // TextField уже показывает ввод через свой controller.
     final interval = _intervals.firstWhere((i) => i.id == id);
     interval.description = description;
   }
@@ -283,46 +241,6 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       final interval = _intervals.firstWhere((i) => i.id == intervalId);
       interval.isRepsBased = !interval.isRepsBased;
     });
-  }
-
-  Future<void> _showEditValueDialog(Interval interval) async {
-    final controller = TextEditingController(
-      text: (interval.isRepsBased ? interval.reps : interval.durationSec)
-          .toString(),
-    );
-    final newValueStr = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          interval.isRepsBased
-              ? 'Количество повторений'
-              : 'Продолжительность (сек)',
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(labelText: 'Укажите значение'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Отмена'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-    if (newValueStr != null) {
-      final newValue = int.tryParse(newValueStr);
-      if (newValue != null && newValue >= 0) {
-        _updateIntervalValue(interval.id, newValue);
-      }
-    }
   }
 
   void _onReorder(int oldIndex, int newIndex) {

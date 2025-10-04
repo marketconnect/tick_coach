@@ -1,6 +1,6 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
-import 'workouts_screen.dart';
+import 'presentation/workouts_screen.dart';
 
 void main() => runApp(const App());
 
