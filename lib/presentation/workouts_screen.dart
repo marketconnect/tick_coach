@@ -201,6 +201,7 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
           return WorkoutCard(
             workout: workout,
             onFormatDuration: _formatDuration,
+            onWorkoutUpdated: _fetchWorkouts,
           );
         },
         separatorBuilder: (context, index) => const SizedBox(height: 8),
@@ -213,11 +214,13 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
 class WorkoutCard extends StatelessWidget {
   final Workout workout;
   final String Function(Duration) onFormatDuration;
+  final VoidCallback onWorkoutUpdated;
 
   const WorkoutCard({
     super.key,
     required this.workout,
     required this.onFormatDuration,
+    required this.onWorkoutUpdated,
   });
 
   @override
@@ -265,15 +268,16 @@ class WorkoutCard extends StatelessWidget {
                       ),
                       PopupMenuButton<String>(
                         tooltip: 'Дополнительные действия',
-                        onSelected: (value) {
+                        onSelected: (value) async {
                           switch (value) {
                             case 'edit':
-                              Navigator.of(context).push(
+                              await Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (context) =>
                                       EditWorkoutScreen(workout: workout),
                                 ),
                               );
+                              onWorkoutUpdated();
                               break;
                             // Handle other cases
                           }
