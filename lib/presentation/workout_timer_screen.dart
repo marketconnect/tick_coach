@@ -139,10 +139,13 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         _isPaused = true;
       });
       _showCompletionDialog();
+      return;
     }
     // If the new interval is reps-based, pause the timer.
     if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
       _pauseTimer();
+    } else {
+      _startTimer();
     }
   }
 
@@ -173,7 +176,9 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       case IntervalKind.work:
         return colors.errorContainer;
       case IntervalKind.rest:
-        return colors.primaryContainer;
+        // return colors.primaryContainer;
+        return Theme.of(context).colorScheme.surfaceContainerHigh;
+
       case IntervalKind.between_sets:
         return colors.secondaryContainer;
       default:
