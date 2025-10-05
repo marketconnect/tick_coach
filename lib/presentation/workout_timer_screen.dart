@@ -77,7 +77,9 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
 
   void _startTimer() {
     if (_timer != null && _timer!.isActive) return;
-
+    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
+      return;
+    }
     setState(() {
       _isPaused = false;
     });
@@ -137,6 +139,10 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         _isPaused = true;
       });
       _showCompletionDialog();
+    }
+    // If the new interval is reps-based, pause the timer.
+    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
+      _pauseTimer();
     }
   }
 
@@ -231,22 +237,45 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                   textAlign: TextAlign.center,
                 ),
               const Spacer(),
-              Text(
-                _formatDuration(_remainingTime),
-                style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                  fontSize: 100,
-                  fontWeight: FontWeight.bold,
+              if (currentInterval.isRepsBased)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${currentInterval.reps}',
+                      style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                        fontSize: 100,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text('повторений'),
+                    const SizedBox(height: 20),
+                    IconButton(
+                      icon: const Icon(Icons.forward_rounded),
+                      iconSize: 60,
+                      onPressed: _moveToNextInterval,
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  _formatDuration(_remainingTime),
+                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                    fontSize: 100,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
               const Spacer(),
             ],
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.large(
-        onPressed: _isPaused ? _startTimer : _pauseTimer,
-        child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-      ),
+      floatingActionButton: currentInterval.isRepsBased
+          ? null
+          : FloatingActionButton.large(
+              onPressed: _isPaused ? _startTimer : _pauseTimer,
+              child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }

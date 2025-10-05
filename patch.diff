@@ -1,0 +1,81 @@
+diff --git a/lib/presentation/workout_timer_screen.dart b/lib/presentation/workout_timer_screen.dart
+index 898144a..f501a3c 100644
+--- a/lib/presentation/workout_timer_screen.dart
++++ b/lib/presentation/workout_timer_screen.dart
+@@ -100,6 +100,10 @@
+   void _startTimer() {
+     if (_timer != null && _timer!.isActive) return;
+ 
++    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
++      return;
++    }
++
+     setState(() {
+       _isPaused = false;
+     });
+@@ -149,6 +153,11 @@
+       });
+       _showCompletionDialog();
+     }
++
++    // If the new interval is reps-based, pause the timer.
++    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
++      _pauseTimer();
++    }
+   }
+ 
+   void _showCompletionDialog() {
+@@ -223,23 +232,37 @@
+                   textAlign: TextAlign.center,
+                 ),
+               const Spacer(),
+-              Text(
+-                _formatDuration(_remainingTime),
+-                style: Theme.of(context).textTheme.displayLarge?.copyWith(
+-                  fontSize: 100,
+-                  fontWeight: FontWeight.bold,
+-                ),
+-              ),
++              if (currentInterval.isRepsBased)
++                Column(mainAxisSize: MainAxisSize.min, children: [
++                  Text(
++                    '${currentInterval.reps}',
++                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
++                          fontSize: 100,
++                          fontWeight: FontWeight.bold,
++                        ),
++                  ),
++                  const Text('повторений'),
++                  const SizedBox(height: 20),
++                  IconButton(
++                    icon: const Icon(Icons.forward_rounded),
++                    iconSize: 60,
++                    onPressed: _moveToNextInterval,
++                  ),
++                ])
++              else
++                Text(
++                  _formatDuration(_remainingTime),
++                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
++                        fontSize: 100,
++                        fontWeight: FontWeight.bold,
++                      ),
++                ),
+               const Spacer(),
+             ],
+           ),
+         ),
+       ),
+-      floatingActionButton: FloatingActionButton.large(
+-        onPressed: _isPaused ? _startTimer : _pauseTimer,
+-        child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+-      ),
++      floatingActionButton: currentInterval.isRepsBased
++          ? null
++          : FloatingActionButton.large(
++              onPressed: _isPaused ? _startTimer : _pauseTimer,
++              child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
++            ),
+       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+     );
+   }
