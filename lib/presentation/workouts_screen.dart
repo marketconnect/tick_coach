@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
+import 'workout_notes_screen.dart';
 import 'agent_entry.dart';
 import '../utils/database_helper.dart';
 
@@ -16,6 +17,7 @@ class Workout {
   final int intervalsCount;
   final bool hasSettings;
   final bool hasNotes;
+  final String? notes;
   final int? repeats;
 
   const Workout({
@@ -26,6 +28,7 @@ class Workout {
     required this.intervalsCount,
     this.hasSettings = false,
     this.hasNotes = false,
+    this.notes,
     this.repeats,
   });
 }
@@ -62,6 +65,7 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
       final List<Workout> loadedWorkouts = [];
       for (final workoutMap in workoutsData) {
         final workoutId = workoutMap['id'] as String;
+        final notes = workoutMap['notes'] as String?;
         final intervals = await dbHelper.getIntervalsForWorkout(workoutId);
         final setCount = await dbHelper.getSetCountForWorkout(workoutId);
         if (intervals.isNotEmpty) {
@@ -88,6 +92,8 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
                   ? ['Нет описания']
                   : previewLines,
               totalTime: Duration(seconds: totalDurationInSeconds),
+              notes: notes,
+              hasNotes: notes != null && notes.isNotEmpty,
               intervalsCount: intervals.length * setCount,
               repeats: setCount,
             ),
@@ -275,6 +281,15 @@ class WorkoutCard extends StatelessWidget {
                                 MaterialPageRoute(
                                   builder: (context) =>
                                       EditWorkoutScreen(workout: workout),
+                                ),
+                              );
+                              onWorkoutUpdated();
+                              break;
+                            case 'notes':
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      WorkoutNotesScreen(workout: workout),
                                 ),
                               );
                               onWorkoutUpdated();

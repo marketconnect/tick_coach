@@ -155,6 +155,19 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   Future<void> _saveWorkout() async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
+    // Create a new workout object with the potentially updated title,
+    // while preserving all other properties from the original workout object.
+    final workoutToSave = Workout(
+      id: widget.workout.id,
+      title: _title,
+      previewLines: widget.workout.previewLines,
+      totalTime: widget.workout.totalTime,
+      intervalsCount: widget.workout.intervalsCount,
+      hasSettings: widget.workout.hasSettings,
+      hasNotes: widget.workout.hasNotes,
+      notes: widget.workout.notes,
+      repeats: widget.workout.repeats,
+    );
     try {
       await DatabaseHelper.instance.saveWorkout(
         widget.workout,

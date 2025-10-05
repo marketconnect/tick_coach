@@ -149,7 +149,8 @@ class DatabaseHelper {
       CREATE TABLE workouts(
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
-        set_count INTEGER NOT NULL
+        set_count INTEGER NOT NULL,
+        notes TEXT
       )
     ''');
 
@@ -183,6 +184,7 @@ class DatabaseHelper {
         'id': workout.id,
         'title': workout.title,
         'set_count': setCount,
+        'notes': workout.notes,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
       // Delete old intervals for this workout
@@ -264,5 +266,15 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getAllWorkouts() async {
     final db = await instance.database;
     return await db.query('workouts', orderBy: 'title');
+  }
+
+  Future<void> updateWorkoutNotes(String workoutId, String notes) async {
+    final db = await instance.database;
+    await db.update(
+      'workouts',
+      {'notes': notes},
+      where: 'id = ?',
+      whereArgs: [workoutId],
+    );
   }
 }

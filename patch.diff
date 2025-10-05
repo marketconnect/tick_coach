@@ -1,0 +1,217 @@
+diff --git a/lib/presentation/edit_workout_screen.dart b/lib/presentation/edit_workout_screen.dart
+index 2212953..031444d 100644
+--- a/lib/presentation/edit_workout_screen.dart
++++ b/lib/presentation/edit_workout_screen.dart
+@@ -188,9 +188,21 @@
+   Future<void> _saveWorkout() async {
+     final messenger = ScaffoldMessenger.of(context);
+     messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
++    // Create a new workout object with the potentially updated title,
++    // while preserving all other properties from the original workout object.
++    final workoutToSave = Workout(
++      id: widget.workout.id,
++      title: _title,
++      previewLines: widget.workout.previewLines,
++      totalTime: widget.workout.totalTime,
++      intervalsCount: widget.workout.intervalsCount,
++      hasSettings: widget.workout.hasSettings,
++      hasNotes: widget.workout.hasNotes,
++      notes: widget.workout.notes,
++      repeats: widget.workout.repeats,
++    );
+     try {
+       await DatabaseHelper.instance.saveWorkout(
+-        widget.workout,
++        workoutToSave,
+         _intervals,
+         _setCount,
+       );
+diff --git a/lib/presentation/workout_notes_screen.dart b/lib/presentation/workout_notes_screen.dart
+new file mode 100644
+index 0000000..8333141
+--- /dev/null
++++ b/lib/presentation/workout_notes_screen.dart
+@@ -0,0 +1,88 @@
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import '../utils/database_helper.dart';
++import 'workouts_screen.dart';
++
++class WorkoutNotesScreen extends StatefulWidget {
++  final Workout workout;
++
++  const WorkoutNotesScreen({super.key, required this.workout});
++
++  @override
++  State<WorkoutNotesScreen> createState() => _WorkoutNotesScreenState();
++}
++
++class _WorkoutNotesScreenState extends State<WorkoutNotesScreen> {
++  late final TextEditingController _notesController;
++
++  @override
++  void initState() {
++    super.initState();
++    _notesController = TextEditingController(text: widget.workout.notes);
++  }
++
++  @override
++  void dispose() {
++    _notesController.dispose();
++    super.dispose();
++  }
++
++  Future<void> _saveNotes() async {
++    final notes = _notesController.text.trim();
++    final messenger = ScaffoldMessenger.of(context);
++    try {
++      await DatabaseHelper.instance
++          .updateWorkoutNotes(widget.workout.id, notes);
++      if (!mounted) return;
++      messenger.showSnackBar(
++        const SnackBar(content: Text('Заметки сохранены')),
++      );
++      Navigator.of(context).pop();
++    } catch (e) {
++      if (!mounted) return;
++      messenger.showSnackBar(
++        SnackBar(content: Text('Ошибка сохранения: $e')),
++      );
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Scaffold(
++      appBar: AppBar(
++        title: const Text('Заметки'),
++        actions: [
++          IconButton(
++            icon: const Icon(Icons.check),
++            tooltip: 'Сохранить',
++            onPressed: () {
++              HapticFeedback.selectionClick();
++              _saveNotes();
++            },
++          ),
++          const SizedBox(width: 8),
++        ],
++      ),
++      body: Padding(
++        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
++        child: TextField(
++          controller: _notesController,
++          autofocus: true,
++          maxLines: null,
++          expands: true,
++          textAlignVertical: TextAlignVertical.top,
++          decoration: const InputDecoration(
++            hintText:
++                'Здесь можно хранить заметки о весах, повторениях, самочувствии и т.д.',
++            border: InputBorder.none,
++          ),
++          keyboardType: TextInputType.multiline,
++          textCapitalization: TextCapitalization.sentences,
++        ),
++      ),
++    );
++  }
++}
+diff --git a/lib/presentation/workouts_screen.dart b/lib/presentation/workouts_screen.dart
+index 2880811..098197e 100644
+--- a/lib/presentation/workouts_screen.dart
++++ b/lib/presentation/workouts_screen.dart
+@@ -4,6 +4,7 @@
+ import 'package:flutter/services.dart';
+ import 'edit_workout_screen.dart';
+ import 'workout_timer_screen.dart';
++import 'workout_notes_screen.dart';
+ import 'agent_entry.dart';
+ import '../utils/database_helper.dart';
+ 
+@@ -16,6 +17,7 @@
+   final int intervalsCount;
+   final bool hasSettings;
+   final bool hasNotes;
++  final String? notes;
+   final int? repeats;
+ 
+   const Workout({
+@@ -26,6 +28,7 @@
+     required this.intervalsCount,
+     this.hasSettings = false,
+     this.hasNotes = false,
++    this.notes,
+     this.repeats,
+   });
+ }
+@@ -62,6 +65,7 @@
+       final List<Workout> loadedWorkouts = [];
+       for (final workoutMap in workoutsData) {
+         final workoutId = workoutMap['id'] as String;
++        final notes = workoutMap['notes'] as String?;
+         final intervals = await dbHelper.getIntervalsForWorkout(workoutId);
+         final setCount = await dbHelper.getSetCountForWorkout(workoutId);
+         if (intervals.isNotEmpty) {
+@@ -85,6 +89,8 @@
+                   ? ['Нет описания']
+                   : previewLines,
+               totalTime: Duration(seconds: totalDurationInSeconds),
++              notes: notes,
++              hasNotes: notes != null && notes.isNotEmpty,
+               intervalsCount: intervals.length * setCount,
+               repeats: setCount,
+             ),
+@@ -250,6 +256,15 @@
+                               );
+                               onWorkoutUpdated();
+                               break;
++                            case 'notes':
++                              await Navigator.of(context).push(
++                                MaterialPageRoute(
++                                  builder: (context) =>
++                                      WorkoutNotesScreen(workout: workout),
++                                ),
++                              );
++                              onWorkoutUpdated();
++                              break;
+                             // Handle other cases
+                           }
+                         },
+diff --git a/lib/utils/database_helper.dart b/lib/utils/database_helper.dart
+index 0825974..367015a 100644
+--- a/lib/utils/database_helper.dart
++++ b/lib/utils/database_helper.dart
+@@ -167,7 +167,8 @@
+       CREATE TABLE workouts(
+         id TEXT PRIMARY KEY,
+         title TEXT NOT NULL,
+-        set_count INTEGER NOT NULL
++        set_count INTEGER NOT NULL,
++        notes TEXT
+       )
+     ''');
+ 
+@@ -196,6 +197,7 @@
+         'id': workout.id,
+         'title': workout.title,
+         'set_count': setCount,
++        'notes': workout.notes,
+       }, conflictAlgorithm: ConflictAlgorithm.replace);
+ 
+       // Delete old intervals for this workout
+@@ -276,4 +278,15 @@
+     final db = await instance.database;
+     return await db.query('workouts', orderBy: 'title');
+   }
++
++  Future<void> updateWorkoutNotes(String workoutId, String notes) async {
++    final db = await instance.database;
++    await db.update(
++      'workouts',
++      {'notes': notes},
++      where: 'id = ?',
++      whereArgs: [workoutId],
++    );
++  }
+ }
