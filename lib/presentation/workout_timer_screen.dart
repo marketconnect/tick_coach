@@ -4,7 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
 import 'package:tick_coach/domain/models/interval.dart' show Interval;
 import '../utils/database_helper.dart';
-
+import 'dart:io';
 import 'workouts_screen.dart'; // For Workout
 
 class WorkoutTimerScreen extends StatefulWidget {
@@ -241,7 +241,19 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
-              const Spacer(),
+              if (currentInterval.imageUri != null &&
+                  currentInterval.imageUri!.isNotEmpty)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Image.file(
+                      File(currentInterval.imageUri!),
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                )
+              else
+                const Spacer(),
               if (currentInterval.isRepsBased)
                 Column(
                   mainAxisSize: MainAxisSize.min,

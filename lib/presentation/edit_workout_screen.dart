@@ -4,6 +4,8 @@ import 'package:tick_coach/domain/models/interval.dart' show Interval;
 import 'workouts_screen.dart';
 import 'package:flutter/services.dart';
 import '../utils/database_helper.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'dart:math';
 import 'package:flutter/gestures.dart';
 
@@ -254,6 +256,44 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     }
   }
 
+  void _duplicateInterval(int index) {
+    setState(() {
+      final originalInterval = _intervals[index];
+      final newId =
+          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
+      final newInterval = Interval(
+        id: newId,
+        kind: originalInterval.kind,
+        title: originalInterval.title,
+        description: originalInterval.description,
+        durationSec: originalInterval.durationSec,
+        reps: originalInterval.reps,
+        isRepsBased: originalInterval.isRepsBased,
+        imageUri: originalInterval.imageUri,
+      );
+      _intervals.insert(index + 1, newInterval);
+    });
+  }
+
+  Future<void> _pickImageForInterval(String intervalId) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        final interval = _intervals.firstWhere((i) => i.id == intervalId);
+        interval.imageUri = pickedFile.path;
+      });
+    }
+  }
+
+  void _removeImageFromInterval(String intervalId) {
+    setState(() {
+      final interval = _intervals.firstWhere((i) => i.id == intervalId);
+      interval.imageUri = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -392,6 +432,9 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
               _updateIntervalDescription(interval.id, newDescription),
           onToggleMetric: () => _toggleMetric(interval.id),
           onEditValue: () {}, // диалог больше не нужен
+          onDuplicate: () => _duplicateInterval(index),
+          onAddPhoto: () => _pickImageForInterval(interval.id),
+          onRemovePhoto: () => _removeImageFromInterval(interval.id),
         );
       },
       onReorder: _onReorder,
@@ -417,6 +460,9 @@ class IntervalCard extends StatefulWidget {
   final void Function(String newDescription) onDescriptionChanged;
   final VoidCallback onToggleMetric;
   final VoidCallback onEditValue;
+  final VoidCallback onDuplicate;
+  final VoidCallback onAddPhoto;
+  final VoidCallback onRemovePhoto;
   const IntervalCard({
     super.key,
     required this.interval,
@@ -429,6 +475,9 @@ class IntervalCard extends StatefulWidget {
     required this.onDescriptionChanged,
     required this.onToggleMetric,
     required this.onEditValue,
+    required this.onDuplicate,
+    required this.onAddPhoto,
+    required this.onRemovePhoto,
   });
 
   @override
@@ -719,17 +768,22 @@ class _IntervalCardState extends State<IntervalCard> {
                     child: const Text('Вставить ниже'),
                   ),
                   MenuItemButton(
-                    onPressed: () {
-                      // TODO: Implement duplicate
-                    },
+                    onPressed: widget.onDuplicate,
                     child: const Text('Копировать'),
                   ),
                   MenuItemButton(
-                    onPressed: () {
-                      // TODO: Implement attach image
-                    },
-                    child: const Text('Добавить фото'),
+                    onPressed: widget.onAddPhoto,
+                    child: Text(
+                      widget.interval.imageUri == null
+                          ? 'Добавить фото'
+                          : 'Изменить фото',
+                    ),
                   ),
+                  if (widget.interval.imageUri != null)
+                    MenuItemButton(
+                      onPressed: widget.onRemovePhoto,
+                      child: const Text('Удалить фото'),
+                    ),
                   const Divider(),
                   MenuItemButton(
                     onPressed: widget.onDelete,
@@ -770,6 +824,20 @@ class _IntervalCardState extends State<IntervalCard> {
               ),
             ),
           ),
+          if (widget.interval.imageUri != null &&
+              widget.interval.imageUri!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12.0),
+                child: Image.file(
+                  File(widget.interval.imageUri!),
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
         ],
       ),
     );
