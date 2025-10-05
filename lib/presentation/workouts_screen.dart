@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
+import 'workout_preview_screen.dart';
 import 'agent_entry.dart';
 import '../utils/database_helper.dart';
 
@@ -131,24 +132,29 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(isWorkoutsTab ? 'Тренировки: ${_workouts.length}' : 'AI'),
-        actions: isWorkoutsTab
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.payments),
-                  tooltip: 'Поддержать проект',
-                  onPressed: () {
-                    /* OpenDonations */
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.settings),
-                  tooltip: 'Настройки приложения',
-                  onPressed: () {
-                    /* OpenAppSettings */
-                  },
-                ),
-              ]
-            : null,
+        centerTitle: false,
+        backgroundColor: cs.surfaceContainer,
+        scrolledUnderElevation: 2.0,
+        shadowColor: Colors.black,
+        surfaceTintColor: Colors.transparent,
+        // actions: isWorkoutsTab
+        //     ? [
+        //         // IconButton(
+        //         //   icon: const Icon(Icons.payments),
+        //         //   tooltip: 'Поддержать проект',
+        //         //   onPressed: () {
+        //         //     /* OpenDonations */
+        //         //   },
+        //         // ),
+        //         IconButton(
+        //           icon: const Icon(Icons.settings),
+        //           tooltip: 'Настройки приложения',
+        //           onPressed: () {
+        //             /* OpenAppSettings */
+        //           },
+        //         ),
+        //       ]
+        //     : null,
       ),
       body: switch (_index) {
         0 => _buildWorkoutsBody(),
@@ -166,6 +172,9 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
           : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
+        backgroundColor: cs.surfaceContainer,
+        shadowColor: Colors.black,
+
         onDestinationSelected: (i) {
           HapticFeedback.selectionClick();
           setState(() => _index = i);
@@ -294,7 +303,51 @@ class WorkoutCard extends StatelessWidget {
                               );
                               onWorkoutUpdated();
                               break;
-                            // Handle other cases
+                            case 'preview':
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      WorkoutPreviewScreen(workout: workout),
+                                ),
+                              );
+                              break;
+                            case 'duplicate':
+                              await DatabaseHelper.instance.duplicateWorkout(
+                                workout.id,
+                              );
+                              onWorkoutUpdated();
+                              break;
+                            case 'delete':
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Удалить тренировку?'),
+                                  content: Text(
+                                    'Тренировка "${workout.title}" будет удалена навсегда.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(false),
+                                      child: const Text('Отмена'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () {
+                                        HapticFeedback.selectionClick();
+                                        Navigator.of(context).pop(true);
+                                      },
+                                      child: const Text('Удалить'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                await DatabaseHelper.instance.deleteWorkout(
+                                  workout.id,
+                                );
+                                onWorkoutUpdated();
+                              }
+                              break;
                           }
                         },
                         itemBuilder: (BuildContext context) =>
@@ -407,11 +460,11 @@ class WorkoutCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ],
-                  if (workout.hasSettings)
-                    const Chip(
-                      avatar: Icon(Icons.tune, size: 16),
-                      label: Text('Есть настройки'),
-                    ),
+                  // if (workout.hasSettings)
+                  //   const Chip(
+                  //     avatar: Icon(Icons.tune, size: 16),
+                  //     label: Text('Есть настройки'),
+                  //   ),
                   if (workout.hasNotes)
                     const Chip(
                       avatar: Icon(Icons.notes, size: 16),

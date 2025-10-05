@@ -277,4 +277,54 @@ class DatabaseHelper {
       whereArgs: [workoutId],
     );
   }
+
+  Future<void> duplicateWorkout(String workoutId) async {
+    final db = await instance.database;
+
+    await db.transaction((txn) async {
+      // 1. Get original workout
+      final originalWorkoutMaps = await txn.query(
+        'workouts',
+        where: 'id = ?',
+        whereArgs: [workoutId],
+      );
+      if (originalWorkoutMaps.isEmpty) {
+        return;
+      }
+      final originalWorkoutMap = originalWorkoutMaps.first;
+
+      // 2. Get original intervals
+      final originalIntervalMaps = await txn.query(
+        'intervals',
+        where: 'workout_id = ?',
+        whereArgs: [workoutId],
+        orderBy: 'sort_order ASC',
+      );
+
+      // 3. Create new workout
+      final newWorkoutId =
+          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+      final newWorkoutTitle = 'Копия ${originalWorkoutMap['title']}';
+
+      final newWorkoutData = Map<String, dynamic>.from(originalWorkoutMap);
+      newWorkoutData['id'] = newWorkoutId;
+      newWorkoutData['title'] = newWorkoutTitle;
+
+      await txn.insert('workouts', newWorkoutData);
+
+      // 4. Create and insert new intervals
+      for (final originalIntervalMap in originalIntervalMaps) {
+        final newIntervalData = Map<String, dynamic>.from(originalIntervalMap);
+        newIntervalData['id'] =
+            '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}_${originalIntervalMap['sort_order']}';
+        newIntervalData['workout_id'] = newWorkoutId;
+        await txn.insert('intervals', newIntervalData);
+      }
+    });
+  }
+
+  Future<void> deleteWorkout(String workoutId) async {
+    final db = await instance.database;
+    await db.delete('workouts', where: 'id = ?', whereArgs: [workoutId]);
+  }
 }
