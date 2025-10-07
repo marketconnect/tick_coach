@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' hide Interval;
 import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
+
 import 'package:tick_coach/domain/models/interval.dart' show Interval;
 import 'workouts_screen.dart';
 import 'package:flutter/services.dart';
@@ -11,8 +12,13 @@ import 'package:flutter/gestures.dart';
 
 class EditWorkoutScreen extends StatefulWidget {
   final Workout workout;
+  final List<Interval>? initialIntervals;
 
-  const EditWorkoutScreen({super.key, required this.workout});
+  const EditWorkoutScreen({
+    super.key,
+    required this.workout,
+    this.initialIntervals,
+  });
 
   @override
   State<EditWorkoutScreen> createState() => _EditWorkoutScreenState();
@@ -29,7 +35,13 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
   void initState() {
     super.initState();
     _title = widget.workout.title;
-    _fetchIntervals();
+    if (widget.initialIntervals != null) {
+      _intervals = widget.initialIntervals!;
+      _setCount = 1; // Sequence is one big set
+      _isLoading = false;
+    } else {
+      _fetchIntervals();
+    }
   }
 
   @override
@@ -170,7 +182,7 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     );
     try {
       await DatabaseHelper.instance.saveWorkout(
-        widget.workout,
+        workoutToSave,
         _intervals,
         _setCount,
       );

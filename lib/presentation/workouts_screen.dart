@@ -1,6 +1,7 @@
 import 'dart:async';
-
-import 'package:flutter/material.dart';
+import 'dart:math';
+import 'package:collection/collection.dart';
+import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
@@ -8,6 +9,8 @@ import 'workout_notes_screen.dart';
 import 'workout_preview_screen.dart';
 import 'agent_entry.dart';
 import '../utils/database_helper.dart';
+import 'package:tick_coach/domain/models/interval.dart'
+    show Interval, IntervalKind;
 
 // Data model based on <entity id="Workout">
 class Workout {
@@ -48,6 +51,8 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   List<Workout> _workouts = [];
+  bool _isSelectionMode = false;
+  final List<Workout> _selectedWorkouts = [];
 
   @override
   void initState() {
@@ -130,44 +135,66 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     final isWorkoutsTab = _index == 0;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isWorkoutsTab ? 'Тренировки: ${_workouts.length}' : 'AI'),
-        centerTitle: false,
-        backgroundColor: cs.surfaceContainer,
-        scrolledUnderElevation: 2.0,
-        shadowColor: Colors.black,
-        surfaceTintColor: Colors.transparent,
-        // actions: isWorkoutsTab
-        //     ? [
-        //         // IconButton(
-        //         //   icon: const Icon(Icons.payments),
-        //         //   tooltip: 'Поддержать проект',
-        //         //   onPressed: () {
-        //         //     /* OpenDonations */
-        //         //   },
-        //         // ),
-        //         IconButton(
-        //           icon: const Icon(Icons.settings),
-        //           tooltip: 'Настройки приложения',
-        //           onPressed: () {
-        //             /* OpenAppSettings */
-        //           },
-        //         ),
-        //       ]
-        //     : null,
-      ),
+      appBar: _buildAppBar(cs, isWorkoutsTab),
       body: switch (_index) {
         0 => _buildWorkoutsBody(),
         1 => const AgentEntry(),
         _ => const SizedBox.shrink(),
       },
       floatingActionButton: isWorkoutsTab
-          ? FloatingActionButton.extended(
-              onPressed: () {
-                /* CreateWorkout */
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Добавить тренировку'),
+          ? MenuAnchor(
+              builder:
+                  (
+                    BuildContext context,
+                    MenuController controller,
+                    Widget? child,
+                  ) {
+                    return FloatingActionButton.extended(
+                      onPressed: () {
+                        if (controller.isOpen) {
+                          controller.close();
+                        } else {
+                          HapticFeedback.selectionClick();
+                          controller.open();
+                        }
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить'),
+                    );
+                  },
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: () async {
+                    final newWorkoutId =
+                        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+                    final newWorkout = Workout(
+                      id: newWorkoutId,
+                      title: 'Новая тренировка',
+                      previewLines: [],
+                      totalTime: Duration.zero,
+                      intervalsCount: 0,
+                    );
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            EditWorkoutScreen(workout: newWorkout),
+                      ),
+                    );
+                    _fetchWorkouts();
+                  },
+                  child: const Text('Тренировка'),
+                ),
+                MenuItemButton(
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _isSelectionMode = true;
+                      _selectedWorkouts.clear();
+                    });
+                  },
+                  child: const Text('Последовательность'),
+                ),
+              ],
             )
           : null,
       bottomNavigationBar: NavigationBar(
@@ -196,6 +223,98 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     );
   }
 
+  AppBar _buildAppBar(ColorScheme cs, bool isWorkoutsTab) {
+    if (_isSelectionMode) {
+      return AppBar(
+        title: const Text('Выберите тренировки'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: _cancelSelection,
+        ),
+        actions: [
+          TextButton(
+            onPressed: _selectedWorkouts.isNotEmpty ? _createSequence : null,
+            child: const Text('Далее'),
+          ),
+        ],
+      );
+    }
+
+    return AppBar(
+      title: Text(isWorkoutsTab ? 'Тренировки: ${_workouts.length}' : 'AI'),
+      centerTitle: false,
+      backgroundColor: cs.surfaceContainer,
+      scrolledUnderElevation: 2.0,
+      shadowColor: Colors.black,
+      surfaceTintColor: Colors.transparent,
+    );
+  }
+
+  void _cancelSelection() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedWorkouts.clear();
+    });
+  }
+
+  Future<void> _createSequence() async {
+    if (_selectedWorkouts.isEmpty) return;
+
+    final dbHelper = DatabaseHelper.instance;
+    final List<Interval> sequenceIntervals = [];
+    String newId() =>
+        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}_${sequenceIntervals.length}';
+
+    for (final workout in _selectedWorkouts) {
+      final intervals = await dbHelper.getIntervalsForWorkout(workout.id);
+      final setCount = await dbHelper.getSetCountForWorkout(workout.id);
+
+      if (intervals.isEmpty) continue;
+
+      final restBetweenSets = intervals.firstWhereOrNull(
+        (i) => i.kind == IntervalKind.between_sets,
+      );
+
+      final workIntervals = intervals
+          .where((i) => i.kind != IntervalKind.between_sets)
+          .toList();
+
+      for (int i = 0; i < setCount; i++) {
+        sequenceIntervals.addAll(
+          workIntervals.map((interval) => interval.copyWith(id: newId())),
+        );
+        if (restBetweenSets != null && i < setCount - 1) {
+          sequenceIntervals.add(restBetweenSets.copyWith(id: newId()));
+        }
+      }
+    }
+
+    final newWorkoutId =
+        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+    final newWorkout = Workout(
+      id: newWorkoutId,
+      title: 'Новая последовательность',
+      previewLines: [],
+      totalTime: Duration.zero, // Will be recalculated on save
+      intervalsCount: sequenceIntervals.length,
+    );
+
+    if (!mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => EditWorkoutScreen(
+          workout: newWorkout,
+          initialIntervals: sequenceIntervals,
+        ),
+      ),
+    );
+
+    // Reset state and refresh list after returning
+    _cancelSelection();
+    _fetchWorkouts();
+  }
+
   Widget _buildWorkoutsBody() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -214,9 +333,22 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
         itemBuilder: (context, index) {
           final workout = _workouts[index];
           return WorkoutCard(
+            key: ValueKey(workout.id),
             workout: workout,
             onFormatDuration: _formatDuration,
             onWorkoutUpdated: _fetchWorkouts,
+            isSelectionMode: _isSelectionMode,
+            isSelected: _selectedWorkouts.contains(workout),
+            onSelected: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                if (_selectedWorkouts.contains(workout)) {
+                  _selectedWorkouts.remove(workout);
+                } else {
+                  _selectedWorkouts.add(workout);
+                }
+              });
+            },
           );
         },
         separatorBuilder: (context, index) => const SizedBox(height: 8),
@@ -230,25 +362,34 @@ class WorkoutCard extends StatelessWidget {
   final Workout workout;
   final String Function(Duration) onFormatDuration;
   final VoidCallback onWorkoutUpdated;
+  final bool isSelectionMode;
+  final bool isSelected;
+  final VoidCallback onSelected;
 
   const WorkoutCard({
-    super.key,
+    required super.key,
     required this.workout,
     required this.onFormatDuration,
     required this.onWorkoutUpdated,
+    this.isSelectionMode = false,
+    this.isSelected = false,
+    required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Card(
       elevation: 2,
       clipBehavior: Clip.antiAlias,
+      color: isSelected ? colorScheme.secondaryContainer : null,
       child: InkWell(
-        onTap: () {
-          /* OpenWorkout(workout.id) */
-        },
+        onTap: isSelectionMode ? onSelected : null,
         onLongPress: () {
-          /* ShowWorkoutMenu(workout.id) */
+          HapticFeedback.selectionClick();
+          // Potentially show context menu
         },
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -262,181 +403,190 @@ class WorkoutCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       workout.title,
-                      style: Theme.of(context).textTheme.titleLarge,
+                      style: theme.textTheme.titleLarge,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Row(
                     children: [
-                      IconButton.filledTonal(
+                      IconButton(
                         icon: const Icon(Icons.play_arrow),
                         tooltip: 'Запустить тренировку',
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  WorkoutTimerScreen(workout: workout),
-                            ),
-                          );
-                        },
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Дополнительные действия',
-                        onSelected: (value) async {
-                          switch (value) {
-                            case 'edit':
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      EditWorkoutScreen(workout: workout),
-                                ),
-                              );
-                              onWorkoutUpdated();
-                              break;
-                            case 'notes':
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      WorkoutNotesScreen(workout: workout),
-                                ),
-                              );
-                              onWorkoutUpdated();
-                              break;
-                            case 'preview':
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      WorkoutPreviewScreen(workout: workout),
-                                ),
-                              );
-                              break;
-                            case 'duplicate':
-                              await DatabaseHelper.instance.duplicateWorkout(
-                                workout.id,
-                              );
-                              onWorkoutUpdated();
-                              break;
-                            case 'delete':
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Удалить тренировку?'),
-                                  content: Text(
-                                    'Тренировка "${workout.title}" будет удалена навсегда.',
+                        onPressed: isSelectionMode
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        WorkoutTimerScreen(workout: workout),
                                   ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(false),
-                                      child: const Text('Отмена'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () {
-                                        HapticFeedback.selectionClick();
-                                        Navigator.of(context).pop(true);
-                                      },
-                                      child: const Text('Удалить'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (confirmed == true) {
-                                await DatabaseHelper.instance.deleteWorkout(
+                                );
+                              },
+                      ),
+                      if (isSelectionMode)
+                        Checkbox(
+                          value: isSelected,
+                          onChanged: (_) => onSelected(),
+                        )
+                      else
+                        PopupMenuButton<String>(
+                          tooltip: 'Дополнительные действия',
+                          onSelected: (value) async {
+                            switch (value) {
+                              case 'edit':
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        EditWorkoutScreen(workout: workout),
+                                  ),
+                                );
+                                onWorkoutUpdated();
+                                break;
+                              case 'notes':
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        WorkoutNotesScreen(workout: workout),
+                                  ),
+                                );
+                                onWorkoutUpdated();
+                                break;
+                              case 'preview':
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        WorkoutPreviewScreen(workout: workout),
+                                  ),
+                                );
+                                break;
+                              case 'duplicate':
+                                await DatabaseHelper.instance.duplicateWorkout(
                                   workout.id,
                                 );
                                 onWorkoutUpdated();
-                              }
-                              break;
-                          }
-                        },
-                        itemBuilder: (BuildContext context) =>
-                            <PopupMenuEntry<String>>[
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: ListTile(
-                                  leading: Icon(Icons.edit),
-                                  title: Text('Изменить'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'preview',
-                                child: ListTile(
-                                  leading: Icon(Icons.visibility),
-                                  title: Text('Просмотр'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'settings',
-                                child: ListTile(
-                                  leading: Icon(Icons.tune),
-                                  title: Text('Настройки'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'notes',
-                                child: ListTile(
-                                  leading: Icon(Icons.notes),
-                                  title: Text('Заметки'),
-                                ),
-                              ),
-                              const PopupMenuDivider(),
-                              const PopupMenuItem(
-                                value: 'duplicate',
-                                child: ListTile(
-                                  leading: Icon(Icons.content_copy),
-                                  title: Text('Копировать'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'shuffle',
-                                child: ListTile(
-                                  leading: Icon(Icons.shuffle),
-                                  title: Text('Перемешать'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'share',
-                                child: ListTile(
-                                  leading: Icon(Icons.share),
-                                  title: Text('Поделиться'),
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'shortcut',
-                                child: ListTile(
-                                  leading: Icon(Icons.link),
-                                  title: Text('Создать ярлык'),
-                                ),
-                              ),
-                              const PopupMenuDivider(),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: ListTile(
-                                  leading: Icon(
-                                    Icons.delete,
-                                    color: Theme.of(context).colorScheme.error,
+                                break;
+                              case 'delete':
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Удалить тренировку?'),
+                                    content: Text(
+                                      'Тренировка "${workout.title}" будет удалена навсегда.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(context).pop(false),
+                                        child: const Text('Отмена'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () {
+                                          HapticFeedback.selectionClick();
+                                          Navigator.of(context).pop(true);
+                                        },
+                                        child: const Text('Удалить'),
+                                      ),
+                                    ],
                                   ),
-                                  title: Text(
-                                    'Удалить',
-                                    style: TextStyle(
+                                );
+                                if (confirmed == true) {
+                                  await DatabaseHelper.instance.deleteWorkout(
+                                    workout.id,
+                                  );
+                                  onWorkoutUpdated();
+                                }
+                                break;
+                            }
+                          },
+                          itemBuilder: (BuildContext context) =>
+                              <PopupMenuEntry<String>>[
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: ListTile(
+                                    leading: Icon(Icons.edit),
+                                    title: Text('Изменить'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'preview',
+                                  child: ListTile(
+                                    leading: Icon(Icons.visibility),
+                                    title: Text('Просмотр'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'settings',
+                                  child: ListTile(
+                                    leading: Icon(Icons.tune),
+                                    title: Text('Настройки'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'notes',
+                                  child: ListTile(
+                                    leading: Icon(Icons.notes),
+                                    title: Text('Заметки'),
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                const PopupMenuItem(
+                                  value: 'duplicate',
+                                  child: ListTile(
+                                    leading: Icon(Icons.content_copy),
+                                    title: Text('Копировать'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'shuffle',
+                                  child: ListTile(
+                                    leading: Icon(Icons.shuffle),
+                                    title: Text('Перемешать'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'share',
+                                  child: ListTile(
+                                    leading: Icon(Icons.share),
+                                    title: Text('Поделиться'),
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'shortcut',
+                                  child: ListTile(
+                                    leading: Icon(Icons.link),
+                                    title: Text('Создать ярлык'),
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    leading: Icon(
+                                      Icons.delete,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.error,
                                     ),
+                                    title: Text(
+                                      'Удалить',
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                      ),
+                              ],
+                        ),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               ...workout.previewLines.map(
-                (line) =>
-                    Text(line, style: Theme.of(context).textTheme.bodyMedium),
+                (line) => Text(line, style: theme.textTheme.bodyMedium),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -446,18 +596,18 @@ class WorkoutCard extends StatelessWidget {
                 children: [
                   Text(
                     'Всего: ${onFormatDuration(workout.totalTime)}',
-                    style: Theme.of(context).textTheme.titleSmall,
+                    style: theme.textTheme.titleSmall,
                   ),
                   const _DotSeparator(),
                   Text(
                     '${workout.intervalsCount} интервалов',
-                    style: Theme.of(context).textTheme.titleSmall,
+                    style: theme.textTheme.titleSmall,
                   ),
                   if (workout.repeats != null) ...[
                     const _DotSeparator(),
                     Text(
                       '${workout.repeats} повт.',
-                      style: Theme.of(context).textTheme.titleSmall,
+                      style: theme.textTheme.titleSmall,
                     ),
                   ],
                   // if (workout.hasSettings)
