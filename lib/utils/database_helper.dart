@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:tick_coach/domain/models/chat_message.dart';
 import 'package:tick_coach/domain/models/interval.dart'
     show Interval, IntervalKind;
 // For Interval and IntervalKind
@@ -43,7 +44,6 @@ class DatabaseHelper {
         'id': workout1Id,
         'title': 'Разминка',
         'set_count': 1,
-        'sort_order': 0,
       });
       final warmupIntervals = [
         Interval(
@@ -97,7 +97,6 @@ class DatabaseHelper {
         'id': workout2Id,
         'title': 'Тренировка',
         'set_count': 1,
-        'sort_order': 1,
       });
       List<Interval> tabataIntervals = [];
       final tabataDescriptions = [
@@ -152,8 +151,7 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         set_count INTEGER NOT NULL,
-        notes TEXT,
-        sort_order INTEGER
+        notes TEXT
       )
     ''');
 
@@ -172,6 +170,15 @@ class DatabaseHelper {
         FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE CASCADE
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE chat_messages(
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        timestamp INTEGER NOT NULL
+      )
+    ''');
   }
 
   Future<void> saveWorkout(
@@ -182,29 +189,12 @@ class DatabaseHelper {
     final db = await instance.database;
 
     await db.transaction((txn) async {
-      final existing = await txn.query(
-        'workouts',
-        where: 'id = ?',
-        whereArgs: [workout.id],
-      );
-      int? sortOrder;
-      if (existing.isEmpty) {
-        final result = await txn.rawQuery(
-          'SELECT MAX(sort_order) as max_order FROM workouts',
-        );
-        final maxOrder = result.first['max_order'];
-        sortOrder = (maxOrder == null ? -1 : maxOrder as int) + 1;
-      } else {
-        sortOrder = existing.first['sort_order'] as int?;
-      }
-
       // Upsert workout
       await txn.insert('workouts', {
         'id': workout.id,
         'title': workout.title,
         'set_count': setCount,
         'notes': workout.notes,
-        'sort_order': sortOrder,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
       // Delete old intervals for this workout
@@ -285,7 +275,7 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getAllWorkouts() async {
     final db = await instance.database;
-    return await db.query('workouts', orderBy: 'sort_order ASC');
+    return await db.query('workouts', orderBy: 'title');
   }
 
   Future<void> updateWorkoutNotes(String workoutId, String notes) async {
@@ -327,13 +317,6 @@ class DatabaseHelper {
       final newWorkoutTitle = 'Копия ${originalWorkoutMap['title']}';
 
       final newWorkoutData = Map<String, dynamic>.from(originalWorkoutMap);
-      final result = await txn.rawQuery(
-        'SELECT MAX(sort_order) as max_order FROM workouts',
-      );
-      final maxOrder = result.first['max_order'];
-      newWorkoutData['sort_order'] =
-          (maxOrder == null ? -1 : maxOrder as int) + 1;
-
       newWorkoutData['id'] = newWorkoutId;
       newWorkoutData['title'] = newWorkoutTitle;
 
@@ -355,17 +338,21 @@ class DatabaseHelper {
     await db.delete('workouts', where: 'id = ?', whereArgs: [workoutId]);
   }
 
-  Future<void> updateWorkoutsOrder(List<Workout> workouts) async {
+  Future<void> saveChatMessage(ChatMessage message) async {
     final db = await instance.database;
-    final batch = db.batch();
-    for (int i = 0; i < workouts.length; i++) {
-      batch.update(
-        'workouts',
-        {'sort_order': i},
-        where: 'id = ?',
-        whereArgs: [workouts[i].id],
-      );
+    await db.insert(
+      'chat_messages',
+      message.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<ChatMessage>> getChatMessages() async {
+    final db = await instance.database;
+    final maps = await db.query('chat_messages', orderBy: 'timestamp ASC');
+    if (maps.isEmpty) {
+      return [];
     }
-    await batch.commit(noResult: true);
+    return maps.map((map) => ChatMessage.fromMap(map)).toList();
   }
 }

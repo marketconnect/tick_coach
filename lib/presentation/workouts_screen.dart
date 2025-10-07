@@ -101,7 +101,6 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
               notes: notes,
               hasNotes: notes != null && notes.isNotEmpty,
               intervalsCount: intervals.length * setCount,
-              // sortOrder is not needed in the model for this implementation
               repeats: setCount,
             ),
           );
@@ -316,19 +315,6 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     _fetchWorkouts();
   }
 
-  void _onReorder(int oldIndex, int newIndex) {
-    if (_isSelectionMode) return;
-
-    setState(() {
-      if (newIndex > oldIndex) {
-        newIndex -= 1;
-      }
-      final Workout item = _workouts.removeAt(oldIndex);
-      _workouts.insert(newIndex, item);
-      DatabaseHelper.instance.updateWorkoutsOrder(_workouts);
-    });
-  }
-
   Widget _buildWorkoutsBody() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -341,43 +327,31 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     }
     return RefreshIndicator(
       onRefresh: _fetchWorkouts,
-      child: ReorderableListView.builder(
+      child: ListView.separated(
         padding: const EdgeInsets.all(8.0),
         itemCount: _workouts.length,
-        buildDefaultDragHandles: false,
         itemBuilder: (context, index) {
           final workout = _workouts[index];
           return WorkoutCard(
             key: ValueKey(workout.id),
             workout: workout,
-            index: index,
             onFormatDuration: _formatDuration,
             onWorkoutUpdated: _fetchWorkouts,
             isSelectionMode: _isSelectionMode,
             isSelected: _selectedWorkouts.contains(workout),
             onSelected: () {
-              if (_isSelectionMode) {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  if (_selectedWorkouts.contains(workout)) {
-                    _selectedWorkouts.remove(workout);
-                  } else {
-                    _selectedWorkouts.add(workout);
-                  }
-                });
-              }
+              HapticFeedback.selectionClick();
+              setState(() {
+                if (_selectedWorkouts.contains(workout)) {
+                  _selectedWorkouts.remove(workout);
+                } else {
+                  _selectedWorkouts.add(workout);
+                }
+              });
             },
           );
         },
-        onReorder: _onReorder,
-        proxyDecorator: (child, index, animation) {
-          return Material(
-            elevation: 8.0,
-            color: Colors.transparent,
-            shadowColor: Colors.black.withOpacity(0.3),
-            child: child,
-          );
-        },
+        separatorBuilder: (context, index) => const SizedBox(height: 8),
       ),
     );
   }
@@ -391,7 +365,6 @@ class WorkoutCard extends StatelessWidget {
   final bool isSelectionMode;
   final bool isSelected;
   final VoidCallback onSelected;
-  final int index;
 
   const WorkoutCard({
     required super.key,
@@ -401,7 +374,6 @@ class WorkoutCard extends StatelessWidget {
     this.isSelectionMode = false,
     this.isSelected = false,
     required this.onSelected,
-    required this.index,
   });
 
   @override
@@ -411,7 +383,6 @@ class WorkoutCard extends StatelessWidget {
 
     return Card(
       elevation: 2,
-      margin: const EdgeInsets.only(bottom: 8),
       clipBehavior: Clip.antiAlias,
       color: isSelected ? colorScheme.secondaryContainer : null,
       child: InkWell(
@@ -430,30 +401,11 @@ class WorkoutCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Row(
-                      children: [
-                        ReorderableDragStartListener(
-                          index: index,
-                          enabled: !isSelectionMode,
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 16.0),
-                            child: Icon(
-                              Icons.drag_handle,
-                              color: isSelectionMode
-                                  ? theme.disabledColor
-                                  : null,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            workout.title,
-                            style: theme.textTheme.titleLarge,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      workout.title,
+                      style: theme.textTheme.titleLarge,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Row(
