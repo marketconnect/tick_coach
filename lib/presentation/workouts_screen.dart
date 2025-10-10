@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
+import 'package:tick_coach/domain/models/workout.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
@@ -11,31 +12,6 @@ import 'agent_entry.dart';
 import '../utils/database_helper.dart';
 import 'package:tick_coach/domain/models/interval.dart'
     show Interval, IntervalKind;
-
-// Data model based on <entity id="Workout">
-class Workout {
-  final String id;
-  final String title;
-  final List<String> previewLines;
-  final Duration totalTime;
-  final int intervalsCount;
-  final bool hasSettings;
-  final bool hasNotes;
-  final String? notes;
-  final int? repeats;
-
-  const Workout({
-    required this.id,
-    required this.title,
-    required this.previewLines,
-    required this.totalTime,
-    required this.intervalsCount,
-    this.hasSettings = false,
-    this.hasNotes = false,
-    this.notes,
-    this.repeats,
-  });
-}
 
 // The main screen widget
 class WorkoutsScreen extends StatefulWidget {

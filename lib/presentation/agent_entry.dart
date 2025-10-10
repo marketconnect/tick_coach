@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
+import 'package:tick_coach/conf.dart';
 import 'package:tick_coach/domain/models/chat_message.dart';
+import 'package:tick_coach/domain/models/interval.dart';
+import 'package:tick_coach/domain/models/workout.dart';
+import 'package:tick_coach/presentation/edit_workout_screen.dart';
 import 'package:tick_coach/utils/database_helper.dart';
 import 'package:tick_coach/utils/websocket_service.dart';
 
@@ -26,9 +31,7 @@ class _AgentEntryState extends State<AgentEntry> {
   @override
   void initState() {
     super.initState();
-    _webSocketService = WebSocketService(
-      'wss://d5dugiqufgjq0ntb4i16.laqt4bj7.apigw.yandexcloud.net/ws',
-    );
+    _webSocketService = WebSocketService(Conf.baseUrl);
     _loadHistoryAndConnect();
   }
 
@@ -55,15 +58,73 @@ class _AgentEntryState extends State<AgentEntry> {
       }
     });
 
-    _messageSubscription = _webSocketService.messages.listen((text) {
+    _messageSubscription = _webSocketService.messages.listen((data) {
       if (!mounted) return;
-      final assistantMessage = ChatMessage(
-        id: _generateId(),
-        text: text,
-        sender: MessageSender.assistant,
-        timestamp: DateTime.now(),
-      );
-      DatabaseHelper.instance.saveChatMessage(assistantMessage);
+
+      ChatMessage assistantMessage;
+
+      try {
+        // Пытаемся распарсить JSON
+        final decoded = jsonDecode(data);
+
+        // Проверяем, что это объект и тип 'workout'
+        if (decoded is Map<String, dynamic> && decoded['type'] == 'workout') {
+          final workoutData = decoded['workout'];
+          final List<Interval> intervals = (workoutData['intervals'] as List)
+              .map((i) {
+                return Interval(
+                  id: _generateId(), // Генерируем новый ID
+                  kind: IntervalKind.values.byName(i['kind']),
+                  title: i['title'],
+                  description: i['description'],
+                  durationSec: i['durationSec'] ?? 0,
+                  reps: i['reps'] ?? 10,
+                  isRepsBased: i['isRepsBased'] ?? false,
+                );
+              })
+              .toList();
+
+          final workout = Workout(
+            id: _generateId(), // Генерируем новый ID
+            title: workoutData['title'],
+            repeats: workoutData['set_count'],
+            previewLines: [],
+            totalTime: Duration.zero,
+            intervalsCount: 0,
+          );
+
+          assistantMessage = ChatMessage(
+            id: _generateId(),
+            sender: MessageSender.assistant,
+            timestamp: DateTime.now(),
+            type: MessageType.workout,
+            workout: workout,
+            intervals: intervals,
+          );
+        } else {
+          // Если это не JSON тренировки, считаем текстом
+          assistantMessage = ChatMessage(
+            id: _generateId(),
+            text: data,
+            sender: MessageSender.assistant,
+            timestamp: DateTime.now(),
+          );
+        }
+      } catch (e) {
+        // Если парсинг не удался, считаем сообщение обычным текстом
+        assistantMessage = ChatMessage(
+          id: _generateId(),
+          text: data,
+          sender: MessageSender.assistant,
+          timestamp: DateTime.now(),
+        );
+      }
+
+      // Сохраняем в историю только текстовые сообщения
+      if (assistantMessage.type == MessageType.text) {
+        DatabaseHelper.instance.saveChatMessage(assistantMessage);
+      }
+
       setState(() {
         _isWaitingForResponse = false;
         _messages.add(assistantMessage);
@@ -141,7 +202,16 @@ class _AgentEntryState extends State<AgentEntry> {
                   return const _TypingIndicator();
                 }
                 final message = _messages[index];
-                return _MessageBubble(message: message);
+                // В зависимости от типа сообщения показываем разный виджет
+                switch (message.type) {
+                  case MessageType.text:
+                    return _TextMessageBubble(message: message);
+                  case MessageType.workout:
+                    return _WorkoutMessageBubble(
+                      workout: message.workout!,
+                      intervals: message.intervals!,
+                    );
+                }
               },
             ),
           ),
@@ -209,9 +279,10 @@ class _AgentEntryState extends State<AgentEntry> {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
+// Переименовываем _MessageBubble в _TextMessageBubble
+class _TextMessageBubble extends StatelessWidget {
   final ChatMessage message;
-  const _MessageBubble({required this.message});
+  const _TextMessageBubble({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -232,7 +303,60 @@ class _MessageBubble extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         child: Padding(
           padding: const EdgeInsets.all(12.0),
-          child: SelectableText(message.text),
+          child: SelectableText(message.text!),
+        ),
+      ),
+    );
+  }
+}
+
+// Новый виджет для отображения тренировки
+class _WorkoutMessageBubble extends StatelessWidget {
+  final Workout workout;
+  final List<Interval> intervals;
+
+  const _WorkoutMessageBubble({required this.workout, required this.intervals});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Card(
+        color: theme.colorScheme.surfaceContainerHighest,
+        elevation: 1,
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Готовая тренировка:', style: theme.textTheme.labelMedium),
+              const SizedBox(height: 4),
+              Text(workout.title, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text('Сеты: ${workout.repeats ?? 1}'),
+              Text('Упражнений в сете: ${intervals.length}'),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.edit_note),
+                  label: const Text('Открыть и сохранить'),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => EditWorkoutScreen(
+                          workout: workout,
+                          initialIntervals: intervals,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -1,0 +1,59 @@
+--- a/lib/presentation/workout_timer_screen.dart
++++ b/lib/presentation/workout_timer_screen.dart
+@@ -428,38 +428,30 @@
+ 
+                     const SizedBox(height: 16),
+ 
++                    if ((currentInterval.kind == IntervalKind.rest ||
++                            currentInterval.kind == IntervalKind.between_sets) &&
++                        _nextInterval != null &&
++                        (_nextInterval!.description?.isNotEmpty ?? false))
++                      Padding(
++                        padding: const EdgeInsets.symmetric(vertical: 16.0),
++                        child: Column(
++                          mainAxisSize: MainAxisSize.min,
++                          children: [
++                            Text('Далее:',
++                                style: Theme.of(context).textTheme.titleMedium),
++                            const SizedBox(height: 4),
++                            Text(
++                              _nextInterval!.description!,
++                              textAlign: TextAlign.center,
++                              style: Theme.of(context).textTheme.headlineSmall,
++                            ),
++                          ],
++                        ),
++                      ),
++
+                     // Add padding at the bottom so the FAB doesn't overlap content
+                     if (!currentInterval.isRepsBased)
+                       const SizedBox(height: 120),
+                   ],
+                 ),
+               ),
+             ),
+           );
+         },
+       ),
+-      bottomSheet:
+-          (currentInterval.kind == IntervalKind.rest ||
+-                  currentInterval.kind == IntervalKind.between_sets) &&
+-              _nextInterval != null &&
+-              _nextInterval!.description != null
+-          ? BottomAppBar(
+-              color: Colors.transparent,
+-              elevation: 0,
+-              child: Padding(
+-                padding: const EdgeInsets.all(8.0),
+-                child: Text(
+-                  'Далее: ${_nextInterval!.description}',
+-                  textAlign: TextAlign.center,
+-                  style: Theme.of(context).textTheme.titleLarge,
+-                ),
+-              ),
+-            )
+-          : null,
+-
+       floatingActionButton: currentInterval.isRepsBased
+           ? null
+           : FloatingActionButton.large(

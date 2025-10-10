@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:tick_coach/domain/models/workout.dart';
 import '../utils/database_helper.dart';
-import 'workouts_screen.dart';
 
 class WorkoutNotesScreen extends StatefulWidget {
   final Workout workout;

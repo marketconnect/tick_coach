@@ -4,8 +4,9 @@ import 'package:sqflite/sqflite.dart';
 import 'package:tick_coach/domain/models/chat_message.dart';
 import 'package:tick_coach/domain/models/interval.dart'
     show Interval, IntervalKind;
+import 'package:tick_coach/domain/models/workout.dart';
 // For Interval and IntervalKind
-import '../presentation/workouts_screen.dart'; // For Workout
+
 import 'dart:math';
 
 class DatabaseHelper {

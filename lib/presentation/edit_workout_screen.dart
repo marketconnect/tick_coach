@@ -2,7 +2,8 @@ import 'package:flutter/material.dart' hide Interval;
 import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
 
 import 'package:tick_coach/domain/models/interval.dart' show Interval;
-import 'workouts_screen.dart';
+import 'package:tick_coach/domain/models/workout.dart';
+
 import 'package:flutter/services.dart';
 import '../utils/database_helper.dart';
 import 'dart:io';

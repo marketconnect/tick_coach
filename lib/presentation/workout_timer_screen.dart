@@ -3,9 +3,9 @@ import 'package:flutter/material.dart' hide Interval;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
 import 'package:tick_coach/domain/models/interval.dart' show Interval;
+import 'package:tick_coach/domain/models/workout.dart';
 import '../utils/database_helper.dart';
 import 'dart:io';
-import 'workouts_screen.dart'; // For Workout
 
 class WorkoutTimerScreen extends StatefulWidget {
   final Workout workout;
@@ -21,11 +21,13 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   String? _errorMessage;
   List<Interval> _workoutPlan = [];
   int _totalSets = 1;
+  int _totalWorkIntervals = 0;
   int _currentIntervalIndex = 0;
   int _currentSet = 1;
   int _remainingTime = 0;
   Timer? _timer;
   bool _isPaused = true;
+  bool _isWorkoutFinished = false;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
@@ -62,6 +64,9 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       setState(() {
         _workoutPlan = intervals;
         _totalSets = setCount;
+        _totalWorkIntervals =
+            intervals.where((i) => i.kind == IntervalKind.work).length *
+            (_totalSets == 0 ? 1 : _totalSets);
         _remainingTime = _workoutPlan.first.durationSec;
         _isLoading = false;
         // Start paused, waiting for user to press play
@@ -72,6 +77,47 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         _isLoading = false;
         _errorMessage = 'Ошибка загрузки тренировки: $e';
       });
+    }
+  }
+
+  int get _currentWorkExerciseNumber {
+    if (_isWorkoutFinished) return _totalWorkIntervals;
+
+    final workIntervalsPerSet = _workoutPlan
+        .where((i) => i.kind == IntervalKind.work)
+        .length;
+    if (workIntervalsPerSet == 0) return 0;
+
+    int completedWorkInPreviousSets = (_currentSet - 1) * workIntervalsPerSet;
+
+    int workCountInCurrentSet = 0;
+    // Count work intervals up to the *previous* interval index.
+    for (int i = 0; i < _currentIntervalIndex; i++) {
+      if (_workoutPlan[i].kind == IntervalKind.work) {
+        workCountInCurrentSet++;
+      }
+    }
+
+    // If the current interval is NOT a work interval, we show the count of
+    // previously completed work intervals.
+    // If the current interval IS a work interval, we add 1 to the count.
+    if (_workoutPlan[_currentIntervalIndex].kind == IntervalKind.work) {
+      workCountInCurrentSet++;
+    }
+
+    return completedWorkInPreviousSets + workCountInCurrentSet;
+  }
+
+  Interval? get _nextInterval {
+    if (_currentIntervalIndex < _workoutPlan.length - 1) {
+      // Next interval in the current set
+      return _workoutPlan[_currentIntervalIndex + 1];
+    } else if (_currentSet < _totalSets) {
+      // First interval of the next set
+      return _workoutPlan.first;
+    } else {
+      // End of workout
+      return null;
     }
   }
 
@@ -137,6 +183,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       _audioPlayer.play(AssetSource('sounds/finish.mp3'));
       setState(() {
         _isPaused = true;
+        _isWorkoutFinished = true;
       });
       _showCompletionDialog();
       return;
@@ -145,6 +192,31 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
     if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
       _pauseTimer();
     } else {
+      _startTimer();
+    }
+  }
+
+  void _moveToPreviousInterval() {
+    final wasPaused = _isPaused;
+    _pauseTimer();
+
+    setState(() {
+      if (_currentIntervalIndex > 0) {
+        _currentIntervalIndex--;
+      } else if (_currentSet > 1) {
+        _currentSet--;
+        _currentIntervalIndex = _workoutPlan.length - 1;
+      } else {
+        // This case should be prevented by the UI, but as a safeguard:
+        if (!wasPaused) _startTimer(); // Resume if it was playing
+        return;
+      }
+
+      _remainingTime = _workoutPlan[_currentIntervalIndex].durationSec;
+      _isWorkoutFinished = false;
+    });
+
+    if (!wasPaused && !_workoutPlan[_currentIntervalIndex].isRepsBased) {
       _startTimer();
     }
   }
@@ -217,76 +289,153 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Сет: $_currentSet / $_totalSets',
-                style: Theme.of(context).textTheme.headlineSmall,
+
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+                minWidth: constraints.maxWidth,
               ),
-              const SizedBox(height: 16),
-              Text(
-                currentInterval.title ?? currentInterval.kind.name,
-                style: Theme.of(context).textTheme.headlineMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              if (currentInterval.description != null &&
-                  currentInterval.description!.isNotEmpty)
-                Text(
-                  currentInterval.description!,
-                  style: Theme.of(context).textTheme.bodyLarge,
-                  textAlign: TextAlign.center,
-                ),
-              if (currentInterval.imageUri != null &&
-                  currentInterval.imageUri!.isNotEmpty)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Image.file(
-                      File(currentInterval.imageUri!),
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                )
-              else
-                const Spacer(),
-              if (currentInterval.isRepsBased)
-                Column(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Back arrow
+                        if (_currentIntervalIndex > 0 || _currentSet > 1)
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_ios_new),
+                            onPressed: _moveToPreviousInterval,
+                          )
+                        else
+                          const SizedBox(width: 48), // Keep space consistent
+                        // Text
+                        Text(
+                          '$_currentWorkExerciseNumber / $_totalWorkIntervals',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+
+                        // Forward arrow
+                        if (_currentIntervalIndex < _workoutPlan.length - 1 ||
+                            _currentSet < _totalSets)
+                          IconButton(
+                            icon: const Icon(Icons.arrow_forward_ios),
+                            onPressed: _moveToNextInterval,
+                          )
+                        else
+                          const SizedBox(width: 48), // Keep space consistent
+                      ],
+                    ),
+                    const SizedBox(height: 16),
                     Text(
-                      '${currentInterval.reps}',
-                      style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                        fontSize: 100,
-                        fontWeight: FontWeight.bold,
+                      currentInterval.title ?? currentInterval.kind.name,
+                      style: Theme.of(context).textTheme.headlineMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+
+                    if (currentInterval.description != null &&
+                        currentInterval.description!.isNotEmpty)
+                      Text(
+                        currentInterval.description!,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                    const Text('повторений'),
-                    const SizedBox(height: 20),
-                    IconButton(
-                      icon: const Icon(Icons.forward_rounded),
-                      iconSize: 60,
-                      onPressed: _moveToNextInterval,
-                    ),
+
+                    if (currentInterval.imageUri != null &&
+                        currentInterval.imageUri!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                MediaQuery.of(context).size.height * 0.35,
+                          ),
+                          child: Image.file(
+                            File(currentInterval.imageUri!),
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 16),
+
+                    if (currentInterval.isRepsBased)
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '${currentInterval.reps}',
+                              style: Theme.of(context).textTheme.displayLarge
+                                  ?.copyWith(
+                                    fontSize: 100,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                          ),
+                          const Text('повторений'),
+                        ],
+                      )
+                    else
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              _formatDuration(_remainingTime),
+                              style: Theme.of(context).textTheme.displayLarge
+                                  ?.copyWith(
+                                    fontSize: 100,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    if ((currentInterval.kind == IntervalKind.rest ||
+                            currentInterval.kind == IntervalKind.between_sets) &&
+                        _nextInterval != null &&
+                        (_nextInterval!.description?.isNotEmpty ?? false))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Далее:',
+                                style: Theme.of(context).textTheme.titleMedium),
+                            const SizedBox(height: 4),
+                            Text(
+                              _nextInterval!.description!,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.headlineSmall,
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // Add padding at the bottom so the FAB doesn't overlap content
+                    if (!currentInterval.isRepsBased)
+                      const SizedBox(height: 120),
                   ],
-                )
-              else
-                Text(
-                  _formatDuration(_remainingTime),
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                    fontSize: 100,
-                    fontWeight: FontWeight.bold,
-                  ),
                 ),
-              const Spacer(),
-            ],
-          ),
-        ),
+              ),
+            ),
+          );
+        },
       ),
+
       floatingActionButton: currentInterval.isRepsBased
           ? null
           : FloatingActionButton.large(
