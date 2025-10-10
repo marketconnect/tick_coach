@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
 import 'package:tick_coach/domain/models/interval.dart' show Interval;
 import 'package:tick_coach/domain/models/workout.dart';
@@ -164,6 +165,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   }
 
   void _moveToNextInterval() {
+    HapticFeedback.selectionClick();
     if (_currentIntervalIndex < _workoutPlan.length - 1) {
       // Move to next interval in the current set
       setState(() {
@@ -197,6 +199,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   }
 
   void _moveToPreviousInterval() {
+    HapticFeedback.selectionClick();
     final wasPaused = _isPaused;
     _pauseTimer();
 
@@ -316,9 +319,13 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                         else
                           const SizedBox(width: 48), // Keep space consistent
                         // Text
-                        Text(
-                          '$_currentWorkExerciseNumber / $_totalWorkIntervals',
-                          style: Theme.of(context).textTheme.headlineSmall,
+                        Semantics(
+                          label:
+                              'Упражнение $_currentWorkExerciseNumber из $_totalWorkIntervals',
+                          child: Text(
+                            '$_currentWorkExerciseNumber / $_totalWorkIntervals',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
                         ),
 
                         // Forward arrow
@@ -326,7 +333,10 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                             _currentSet < _totalSets)
                           IconButton(
                             icon: const Icon(Icons.arrow_forward_ios),
-                            onPressed: _moveToNextInterval,
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              _moveToNextInterval();
+                            },
                           )
                         else
                           const SizedBox(width: 48), // Keep space consistent
@@ -439,7 +449,10 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       floatingActionButton: currentInterval.isRepsBased
           ? null
           : FloatingActionButton.large(
-              onPressed: _isPaused ? _startTimer : _pauseTimer,
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                _isPaused ? _startTimer() : _pauseTimer();
+              },
               child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
             ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
