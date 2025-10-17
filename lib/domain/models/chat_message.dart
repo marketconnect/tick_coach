@@ -3,7 +3,6 @@ import 'package:tick_coach/domain/models/workout.dart';
 
 enum MessageSender { user, assistant }
 
-// Тип сообщения: текст или тренировка
 enum MessageType { text, workout }
 
 class ChatMessage {
@@ -12,7 +11,6 @@ class ChatMessage {
   final DateTime timestamp;
   final MessageType type;
 
-  // Поля для разных типов сообщений
   final String? text;
   final Workout? workout;
   final List<Interval>? intervals;
