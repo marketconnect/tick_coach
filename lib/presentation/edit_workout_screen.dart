@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
+import 'package:vosk_flutter/vosk_flutter.dart';
+import 'dart:async';
 
 import '../utils/database_helper.dart';
 
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'dart:math';
+import 'package:path_provider/path_provider.dart';
+import 'package:archive/archive.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'dart:convert';
 
 class EditWorkoutScreen extends StatefulWidget {
   final TrainingSession trainingSession;
@@ -22,12 +28,89 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
   String? _errorMessage;
   late TrainingSession _session;
   final _scrollController = ScrollController();
+  // VOSK variables
+  VoskFlutterPlugin? _vosk;
+  Model? _model;
+  Recognizer? _recognizer;
+  SpeechService? _speechService;
+  StreamSubscription<String>? _resultSubscription;
+  bool _isModelLoading = true;
+  bool _isListening = false;
 
   @override
   void initState() {
     super.initState();
     _session = widget.trainingSession;
     _isLoading = false; // Data is passed in directly
+    _initVosk();
+  }
+
+  Future<void> _initVosk() async {
+    _vosk = VoskFlutterPlugin.instance();
+    try {
+      final modelPath = await _loadModelFromAssets();
+      _model = await _vosk!.createModel(modelPath);
+      _recognizer = await _vosk!.createRecognizer(
+        model: _model!,
+        sampleRate: 16000,
+      );
+
+      _speechService = await _vosk!.initSpeechService(_recognizer!);
+      _resultSubscription = _speechService!.onResult().listen((result) {
+        final jsonResult = jsonDecode(result);
+        final text = jsonResult['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          _handleVoiceCommand(text);
+        }
+        // Stop listening and update UI after a final result is received.
+        _speechService?.stop();
+        if (mounted) {
+          setState(() {
+            _isListening = false;
+          });
+        }
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _isModelLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isModelLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка инициализации модели: ${e.toString()}')),
+      );
+    }
+  }
+
+  Future<String> _loadModelFromAssets() async {
+    final tempDir = await getTemporaryDirectory();
+    final modelDir = Directory('${tempDir.path}/vosk_model_ru');
+
+    if (!await modelDir.exists()) {
+      await modelDir.create(recursive: true);
+      final assetData = await rootBundle.load(
+        'assets/models/vosk-model-small-ru-0.22.zip',
+      );
+      final bytes = assetData.buffer.asUint8List();
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      for (final file in archive) {
+        final filename = '${modelDir.path}/${file.name}';
+        if (file.isFile) {
+          final outFile = File(filename);
+          await outFile.create(recursive: true);
+          await outFile.writeAsBytes(file.content as List<int>);
+        } else {
+          await Directory(filename).create(recursive: true);
+        }
+      }
+    }
+    // The path to the unzipped directory inside the model archive
+    return '${modelDir.path}/vosk-model-small-ru-0.22';
   }
 
   String _generateId() =>
@@ -36,6 +119,8 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
   @override
   void dispose() {
     _scrollController.dispose();
+    _speechService?.stop();
+    _resultSubscription?.cancel();
     super.dispose();
   }
 
@@ -71,6 +156,187 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
     );
     if (result != null && result.isNotEmpty) {
       setState(() => _session.name = result);
+    }
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isModelLoading || _speechService == null) return;
+
+    if (_isListening) {
+      await _speechService!.stop();
+      setState(() {
+        _isListening = false;
+      });
+    } else {
+      try {
+        await _speechService!.start();
+        setState(() {
+          _isListening = true;
+        });
+      } catch (e) {
+        // silent
+      }
+    }
+  }
+
+  void _handleVoiceCommand(String command) {
+    if (command.isEmpty) return;
+    command = command.toLowerCase();
+
+    // Synonyms
+    command = command.replaceAll('повторений', 'раз');
+    command = command.replaceAll('повторов', 'раз');
+    command = command.replaceAll('килограмм', 'кг');
+
+    // 1. Add Block
+    if (command.contains('блок')) {
+      String type = 'Основная часть';
+      if (command.contains('разминка')) type = 'Разминка';
+      if (command.contains('заминка')) type = 'Заминка';
+
+      setState(() {
+        _session.blocks.add(Block(id: _generateId(), type: type, sets: []));
+      });
+      return;
+    }
+
+    // 2. Add Set
+    if (command.contains('сет')) {
+      var lastBlock = _session.blocks.lastOrNull;
+      if (lastBlock == null) {
+        lastBlock = Block(id: _generateId(), type: 'Основная часть', sets: []);
+        _session.blocks.add(lastBlock);
+      }
+
+      int repeat = 1;
+      final repeatMatch = RegExp(
+        r'(\d+)\s+(?:раз|круга|круг)',
+      ).firstMatch(command);
+      if (repeatMatch != null) {
+        repeat = int.tryParse(repeatMatch.group(1)!) ?? 1;
+      }
+
+      String? label;
+      if (command.contains('суперсет')) label = 'Суперсет';
+      if (command.contains('трисет')) label = 'Трисет';
+
+      setState(() {
+        lastBlock!.sets.add(
+          Set(id: _generateId(), items: [], repeat: repeat, label: label),
+        );
+      });
+      return;
+    }
+
+    // 3. Add Rest
+    if (command.startsWith('отдых')) {
+      final durationMatch = RegExp(r'(\d+)\s+секунд').firstMatch(command);
+      int duration = 60;
+      if (durationMatch != null) {
+        duration = int.tryParse(durationMatch.group(1)!) ?? 60;
+      }
+
+      _addItemToLastSet(Rest(id: _generateId(), durationSec: duration));
+      return;
+    }
+
+    // 4. Add Exercise
+    var processedCommand = command
+        .replaceFirst('добавь', '')
+        .replaceFirst('новое упражнение', '')
+        .trim();
+
+    if (processedCommand == 'упражнение') {
+      _addItemToLastSet(Exercise(id: _generateId(), name: 'Новое упражнение'));
+      return;
+    }
+
+    int? reps;
+    final repsMatch = RegExp(r'(\d+)\s+раз').firstMatch(processedCommand);
+    if (repsMatch != null) {
+      reps = int.tryParse(repsMatch.group(1)!);
+      processedCommand = processedCommand
+          .replaceAll(repsMatch.group(0)!, '')
+          .trim();
+    }
+
+    double? loadKg;
+    final loadMatch = RegExp(
+      r'(\d+(?:\.|\,)?\d*)\s+кг',
+    ).firstMatch(processedCommand);
+    if (loadMatch != null) {
+      loadKg = double.tryParse(loadMatch.group(1)!.replaceAll(',', '.'));
+      processedCommand = processedCommand
+          .replaceAll(loadMatch.group(0)!, '')
+          .trim();
+    }
+
+    final name = processedCommand.isNotEmpty
+        ? processedCommand
+        : 'Новое упражнение';
+
+    _addItemToLastSet(
+      Exercise(
+        id: _generateId(),
+        name: name.capitalize(),
+        reps: reps ?? 10,
+        loadKg: loadKg,
+      ),
+    );
+  }
+
+  void _addItemToLastSet(SetItem item) {
+    setState(() {
+      var lastSet = _session.blocks.lastOrNull?.sets.lastOrNull;
+      if (lastSet == null) {
+        var lastBlock = _session.blocks.lastOrNull;
+        if (lastBlock == null) {
+          lastBlock = Block(
+            id: _generateId(),
+            type: 'Основная часть',
+            sets: [],
+          );
+          _session.blocks.add(lastBlock);
+        }
+        lastSet = Set(id: _generateId(), items: []);
+        lastBlock.sets.add(lastSet);
+      }
+      lastSet.items.add(item);
+    });
+  }
+
+  Future<void> _showEditBlockLabelDialog(Block block) async {
+    final controller = TextEditingController(text: block.label ?? block.type);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Название блока'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Введите название',
+            hintText: 'Например: Разминка',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).pop(controller.text.trim());
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      setState(() => block.label = result);
     }
   }
 
@@ -239,17 +505,25 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
     if (_errorMessage != null) {
       return Center(child: Text(_errorMessage!));
     }
-    return ListView.builder(
-      controller: _scrollController,
+    return ReorderableListView.builder(
+      buildDefaultDragHandles: false,
+      proxyDecorator: (widget, index, animation) {
+        return Material(
+          elevation: 4.0,
+          color: Colors.transparent,
+          child: widget,
+        );
+      },
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
       itemCount: _session.blocks.length,
       itemBuilder: (context, index) {
         final block = _session.blocks[index];
         return _BlockCard(
           key: ValueKey(block.id),
+          index: index,
           block: block,
           onAddSet: () => _addSet(block),
-
+          onEditLabel: () => _showEditBlockLabelDialog(block),
           onDelete: () => _deleteBlock(index),
           onDuplicate: () => _duplicateBlock(index),
           onDuplicateSet: _duplicateSet,
@@ -272,12 +546,24 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
           generateId: _generateId,
         );
       },
+      onReorder: (oldIndex, newIndex) {
+        setState(() {
+          if (newIndex > oldIndex) {
+            newIndex -= 1;
+          }
+          final item = _session.blocks.removeAt(oldIndex);
+          _session.blocks.insert(newIndex, item);
+        });
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _isListening
+          ? Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3)
+          : null,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
@@ -313,10 +599,36 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
         ],
       ),
       body: _buildBody(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addBlock,
-        tooltip: 'Добавить блок',
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: 'voiceInputFab',
+            onPressed: _isModelLoading ? null : _toggleListening,
+            tooltip: 'Голосовой ввод',
+            backgroundColor: _isListening
+                ? Theme.of(context).colorScheme.tertiaryContainer
+                : null,
+            child: _isModelLoading
+                ? const CircularProgressIndicator(color: Colors.white)
+                : AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    transitionBuilder: (child, animation) =>
+                        ScaleTransition(scale: animation, child: child),
+                    child: Icon(
+                      _isListening ? Icons.mic_off : Icons.mic,
+                      key: ValueKey<bool>(_isListening),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 16),
+          FloatingActionButton(
+            heroTag: 'addBlockFab',
+            onPressed: _addBlock,
+            tooltip: 'Добавить блок',
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }
@@ -324,7 +636,9 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
 
 class _BlockCard extends StatelessWidget {
   final Block block;
+  final int index;
   final VoidCallback onAddSet;
+  final VoidCallback onEditLabel;
   final VoidCallback onDelete;
   final VoidCallback onDuplicate;
   final void Function(Set) onAddExercise;
@@ -343,7 +657,9 @@ class _BlockCard extends StatelessWidget {
   const _BlockCard({
     super.key,
     required this.block,
+    required this.index,
     required this.onAddSet,
+    required this.onEditLabel,
     required this.onDelete,
     required this.onDuplicate,
     required this.onDuplicateSet,
@@ -365,19 +681,34 @@ class _BlockCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: ExpansionTile(
-        title: Text(
-          block.label ?? block.type,
-          style: Theme.of(context).textTheme.titleLarge,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                block.label ?? block.type,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        leading: ReorderableDragStartListener(
+          index: index,
+          child: const Icon(Icons.drag_handle),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             PopupMenuButton<String>(
               onSelected: (value) {
+                if (value == 'edit') onEditLabel();
                 if (value == 'delete') onDelete();
                 if (value == 'duplicate') onDuplicate();
               },
               itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Переименовать'),
+                ),
                 const PopupMenuItem(
                   value: 'duplicate',
                   child: Text('Копировать блок'),
@@ -723,7 +1054,10 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
                     case 'insert_ex_above':
                       widget.onInsert(
                         widget.index,
-                        Exercise(id: widget.generateId(), name: 'Новое упражнение'),
+                        Exercise(
+                          id: widget.generateId(),
+                          name: 'Новое упражнение',
+                        ),
                       );
                       break;
                     case 'insert_rest_above':
@@ -735,7 +1069,10 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
                     case 'insert_ex_below':
                       widget.onInsert(
                         widget.index + 1,
-                        Exercise(id: widget.generateId(), name: 'Новое упражнение'),
+                        Exercise(
+                          id: widget.generateId(),
+                          name: 'Новое упражнение',
+                        ),
                       );
                       break;
                     case 'insert_rest_below':
