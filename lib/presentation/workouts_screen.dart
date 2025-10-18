@@ -1,17 +1,14 @@
 import 'dart:async';
 import 'dart:math';
-import 'package:collection/collection.dart';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
-import 'package:tick_coach/domain/models/workout.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
 import 'workout_preview_screen.dart';
 import 'agent_entry.dart';
 import '../utils/database_helper.dart';
-import 'package:tick_coach/domain/models/interval.dart'
-    show Interval, IntervalKind;
 
 // The main screen widget
 class WorkoutsScreen extends StatefulWidget {
@@ -26,9 +23,9 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
   // State management based on <screen id="workouts_screen"> states
   bool _isLoading = true;
   String? _errorMessage;
-  List<Workout> _workouts = [];
+  List<TrainingSession> _sessions = [];
   bool _isSelectionMode = false;
-  final List<Workout> _selectedWorkouts = [];
+  final List<TrainingSession> _selectedSessions = [];
 
   @override
   void initState() {
@@ -43,53 +40,24 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     });
     try {
       final dbHelper = DatabaseHelper.instance;
-      final workoutsData = await dbHelper.getAllWorkouts();
-      final List<Workout> loadedWorkouts = [];
-      for (final workoutMap in workoutsData) {
-        final workoutId = workoutMap['id'] as String;
-        final notes = workoutMap['notes'] as String?;
-        final intervals = await dbHelper.getIntervalsForWorkout(workoutId);
-        final setCount = await dbHelper.getSetCountForWorkout(workoutId);
-        if (intervals.isNotEmpty) {
-          final totalDurationInSeconds =
-              intervals.fold<int>(0, (sum, item) => sum + item.durationSec) *
-              setCount;
-          final distinctDescriptions = intervals
-              .map((i) => i.description)
-              .where((d) => d != null && d.isNotEmpty)
-              .toSet()
-              .toList();
-          final previewLines = distinctDescriptions
-              .take(3)
-              .map((d) => d!)
-              .toList();
-          if (distinctDescriptions.length > 3) {
-            previewLines.add('...');
-          }
-          loadedWorkouts.add(
-            Workout(
-              id: workoutId,
-              title: workoutMap['title'] as String,
-              previewLines: previewLines.isEmpty
-                  ? ['Нет описания']
-                  : previewLines,
-              totalTime: Duration(seconds: totalDurationInSeconds),
-              notes: notes,
-              hasNotes: notes != null && notes.isNotEmpty,
-              intervalsCount: intervals.length * setCount,
-              repeats: setCount,
-            ),
-          );
+      final sessionsData = await dbHelper.getAllTrainingSessions();
+      final List<TrainingSession> loadedSessions = [];
+      for (final sessionMap in sessionsData) {
+        final session = await dbHelper.getTrainingSession(
+          sessionMap['id'] as String,
+        );
+        if (session != null) {
+          loadedSessions.add(session);
         }
       }
       if (!mounted) return;
       setState(() {
-        _workouts = loadedWorkouts;
+        _sessions = loadedSessions;
         _isLoading = false;
       });
     } catch (e) {
       setState(() {
-        _errorMessage = 'Не удалось загрузить тренировки';
+        _errorMessage = 'Не удалось загрузить тренировки: $e';
         _isLoading = false;
       });
     }
@@ -141,19 +109,16 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
               menuChildren: [
                 MenuItemButton(
                   onPressed: () async {
-                    final newWorkoutId =
+                    final newSessionId =
                         '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
-                    final newWorkout = Workout(
-                      id: newWorkoutId,
-                      title: 'Новая тренировка',
-                      previewLines: [],
-                      totalTime: Duration.zero,
-                      intervalsCount: 0,
+                    final newSession = TrainingSession(
+                      id: newSessionId,
+                      name: 'Новая тренировка',
                     );
                     await Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (context) =>
-                            EditWorkoutScreen(workout: newWorkout),
+                            EditWorkoutScreen(trainingSession: newSession),
                       ),
                     );
                     _fetchWorkouts();
@@ -165,7 +130,7 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
                     HapticFeedback.selectionClick();
                     setState(() {
                       _isSelectionMode = true;
-                      _selectedWorkouts.clear();
+                      _selectedSessions.clear();
                     });
                   },
                   child: const Text('Последовательность'),
@@ -209,7 +174,7 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: _selectedWorkouts.isNotEmpty ? _createSequence : null,
+            onPressed: _selectedSessions.isNotEmpty ? _createSequence : null,
             child: const Text('Далее'),
           ),
         ],
@@ -217,7 +182,7 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     }
 
     return AppBar(
-      title: Text(isWorkoutsTab ? 'Тренировки: ${_workouts.length}' : 'AI'),
+      title: Text(isWorkoutsTab ? 'Тренировки: ${_sessions.length}' : 'AI'),
       centerTitle: false,
       backgroundColor: cs.surfaceContainer,
       scrolledUnderElevation: 2.0,
@@ -229,60 +194,39 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
   void _cancelSelection() {
     setState(() {
       _isSelectionMode = false;
-      _selectedWorkouts.clear();
+      _selectedSessions.clear();
     });
   }
 
   Future<void> _createSequence() async {
-    if (_selectedWorkouts.isEmpty) return;
+    if (_selectedSessions.isEmpty) return;
 
     final dbHelper = DatabaseHelper.instance;
-    final List<Interval> sequenceIntervals = [];
-    String newId() =>
-        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}_${sequenceIntervals.length}';
+    final List<Block> sequenceBlocks = [];
 
-    for (final workout in _selectedWorkouts) {
-      final intervals = await dbHelper.getIntervalsForWorkout(workout.id);
-      final setCount = await dbHelper.getSetCountForWorkout(workout.id);
-
-      if (intervals.isEmpty) continue;
-
-      final restBetweenSets = intervals.firstWhereOrNull(
-        (i) => i.kind == IntervalKind.between_sets,
-      );
-
-      final workIntervals = intervals
-          .where((i) => i.kind != IntervalKind.between_sets)
-          .toList();
-
-      for (int i = 0; i < setCount; i++) {
-        sequenceIntervals.addAll(
-          workIntervals.map((interval) => interval.copyWith(id: newId())),
-        );
-        if (restBetweenSets != null && i < setCount - 1) {
-          sequenceIntervals.add(restBetweenSets.copyWith(id: newId()));
-        }
+    for (final session in _selectedSessions) {
+      final fullSession = await dbHelper.getTrainingSession(session.id);
+      if (fullSession != null) {
+        // Just add all blocks from the selected session
+        sequenceBlocks.addAll(fullSession.blocks);
       }
     }
 
-    final newWorkoutId =
+    // This logic might need refinement. For now, just combining blocks.
+    // A better approach might be to create a new block for each combined workout.
+    final newSessionId =
         '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
-    final newWorkout = Workout(
-      id: newWorkoutId,
-      title: 'Новая последовательность',
-      previewLines: [],
-      totalTime: Duration.zero, // Will be recalculated on save
-      intervalsCount: sequenceIntervals.length,
+    final newSession = TrainingSession(
+      id: newSessionId,
+      name: 'Новая последовательность',
+      blocks: sequenceBlocks,
     );
 
     if (!mounted) return;
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => EditWorkoutScreen(
-          workout: newWorkout,
-          initialIntervals: sequenceIntervals,
-        ),
+        builder: (context) => EditWorkoutScreen(trainingSession: newSession),
       ),
     );
 
@@ -298,30 +242,30 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     if (_errorMessage != null) {
       return Center(child: Text(_errorMessage!));
     }
-    if (_workouts.isEmpty) {
+    if (_sessions.isEmpty) {
       return const Center(child: Text('Пока нет тренировок'));
     }
     return RefreshIndicator(
       onRefresh: _fetchWorkouts,
       child: ListView.separated(
         padding: const EdgeInsets.all(8.0),
-        itemCount: _workouts.length,
+        itemCount: _sessions.length,
         itemBuilder: (context, index) {
-          final workout = _workouts[index];
-          return WorkoutCard(
-            key: ValueKey(workout.id),
-            workout: workout,
+          final session = _sessions[index];
+          return TrainingSessionCard(
+            key: ValueKey(session.id),
+            session: session,
             onFormatDuration: _formatDuration,
             onWorkoutUpdated: _fetchWorkouts,
             isSelectionMode: _isSelectionMode,
-            isSelected: _selectedWorkouts.contains(workout),
+            isSelected: _selectedSessions.contains(session),
             onSelected: () {
               HapticFeedback.selectionClick();
               setState(() {
-                if (_selectedWorkouts.contains(workout)) {
-                  _selectedWorkouts.remove(workout);
+                if (_selectedSessions.contains(session)) {
+                  _selectedSessions.remove(session);
                 } else {
-                  _selectedWorkouts.add(workout);
+                  _selectedSessions.add(session);
                 }
               });
             },
@@ -334,17 +278,17 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
 }
 
 // UI component based on <template id="WorkoutCard">
-class WorkoutCard extends StatelessWidget {
-  final Workout workout;
+class TrainingSessionCard extends StatelessWidget {
+  final TrainingSession session;
   final String Function(Duration) onFormatDuration;
   final VoidCallback onWorkoutUpdated;
   final bool isSelectionMode;
   final bool isSelected;
   final VoidCallback onSelected;
 
-  const WorkoutCard({
+  const TrainingSessionCard({
     required super.key,
-    required this.workout,
+    required this.session,
     required this.onFormatDuration,
     required this.onWorkoutUpdated,
     this.isSelectionMode = false,
@@ -378,7 +322,7 @@ class WorkoutCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      workout.title,
+                      session.name,
                       style: theme.textTheme.titleLarge,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -395,7 +339,7 @@ class WorkoutCard extends StatelessWidget {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (context) =>
-                                        WorkoutTimerScreen(workout: workout),
+                                        WorkoutTimerScreen(session: session),
                                   ),
                                 );
                               },
@@ -413,8 +357,9 @@ class WorkoutCard extends StatelessWidget {
                               case 'edit':
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        EditWorkoutScreen(workout: workout),
+                                    builder: (context) => EditWorkoutScreen(
+                                      trainingSession: session,
+                                    ),
                                   ),
                                 );
                                 onWorkoutUpdated();
@@ -423,7 +368,7 @@ class WorkoutCard extends StatelessWidget {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (context) =>
-                                        WorkoutNotesScreen(workout: workout),
+                                        WorkoutNotesScreen(session: session),
                                   ),
                                 );
                                 onWorkoutUpdated();
@@ -432,14 +377,14 @@ class WorkoutCard extends StatelessWidget {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (context) =>
-                                        WorkoutPreviewScreen(workout: workout),
+                                        WorkoutPreviewScreen(session: session),
                                   ),
                                 );
                                 break;
                               case 'duplicate':
-                                await DatabaseHelper.instance.duplicateWorkout(
-                                  workout.id,
-                                );
+                                // await DatabaseHelper.instance.duplicateWorkout(
+                                //   session.id,
+                                // );
                                 onWorkoutUpdated();
                                 break;
                               case 'delete':
@@ -448,7 +393,7 @@ class WorkoutCard extends StatelessWidget {
                                   builder: (context) => AlertDialog(
                                     title: const Text('Удалить тренировку?'),
                                     content: Text(
-                                      'Тренировка "${workout.title}" будет удалена навсегда.',
+                                      'Тренировка "${session.name}" будет удалена навсегда.',
                                     ),
                                     actions: [
                                       TextButton(
@@ -467,9 +412,8 @@ class WorkoutCard extends StatelessWidget {
                                   ),
                                 );
                                 if (confirmed == true) {
-                                  await DatabaseHelper.instance.deleteWorkout(
-                                    workout.id,
-                                  );
+                                  await DatabaseHelper.instance
+                                      .deleteTrainingSession(session.id);
                                   onWorkoutUpdated();
                                 }
                                 break;
@@ -561,37 +505,21 @@ class WorkoutCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              ...workout.previewLines.map(
-                (line) => Text(line, style: theme.textTheme.bodyMedium),
-              ),
+              // ...workout.previewLines.map(
+              //   (line) => Text(line, style: theme.textTheme.bodyMedium),
+              // ),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8.0,
                 runSpacing: 4.0,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Text(
-                    'Всего: ${onFormatDuration(workout.totalTime)}',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  const _DotSeparator(),
-                  Text(
-                    '${workout.intervalsCount} интервалов',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  if (workout.repeats != null) ...[
-                    const _DotSeparator(),
-                    Text(
-                      '${workout.repeats} повт.',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ],
                   // if (workout.hasSettings)
                   //   const Chip(
                   //     avatar: Icon(Icons.tune, size: 16),
                   //     label: Text('Есть настройки'),
                   //   ),
-                  if (workout.hasNotes)
+                  if (session.notes != null && session.notes!.isNotEmpty)
                     const Chip(
                       avatar: Icon(Icons.notes, size: 16),
                       label: Text('Есть заметки'),
@@ -600,24 +528,6 @@ class WorkoutCard extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DotSeparator extends StatelessWidget {
-  const _DotSeparator();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-      child: Text(
-        '•',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).textTheme.bodySmall?.color,
         ),
       ),
     );

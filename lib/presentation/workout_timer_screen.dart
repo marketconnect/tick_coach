@@ -1,17 +1,29 @@
 import 'dart:async';
-import 'package:flutter/material.dart' hide Interval;
+import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
-import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
-import 'package:tick_coach/domain/models/interval.dart' show Interval;
-import 'package:tick_coach/domain/models/workout.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
 import '../utils/database_helper.dart';
-import 'dart:io';
+
+class TimerStep {
+  final SetItem item;
+  final int currentSet;
+  final int totalSets;
+  final int currentExerciseInSet;
+  final int totalExercisesInSet;
+
+  TimerStep(
+    this.item,
+    this.currentSet,
+    this.totalSets,
+    this.currentExerciseInSet,
+    this.totalExercisesInSet,
+  );
+}
 
 class WorkoutTimerScreen extends StatefulWidget {
-  final Workout workout;
-
-  const WorkoutTimerScreen({super.key, required this.workout});
+  final TrainingSession session;
+  const WorkoutTimerScreen({super.key, required this.session});
 
   @override
   State<WorkoutTimerScreen> createState() => _WorkoutTimerScreenState();
@@ -20,15 +32,13 @@ class WorkoutTimerScreen extends StatefulWidget {
 class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   bool _isLoading = true;
   String? _errorMessage;
-  List<Interval> _workoutPlan = [];
-  int _totalSets = 1;
-  int _totalWorkIntervals = 0;
+  final List<TimerStep> _workoutPlan = [];
   int _currentIntervalIndex = 0;
-  int _currentSet = 1;
+
   int _remainingTime = 0;
   Timer? _timer;
   bool _isPaused = true;
-  bool _isWorkoutFinished = false;
+
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
@@ -46,15 +56,12 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
 
   Future<void> _loadWorkoutData() async {
     try {
-      final dbHelper = DatabaseHelper.instance;
-      final intervals = await dbHelper.getIntervalsForWorkout(
-        widget.workout.id,
+      final session = await DatabaseHelper.instance.getTrainingSession(
+        widget.session.id,
       );
-      final setCount = await dbHelper.getSetCountForWorkout(widget.workout.id);
 
       if (!mounted) return;
-
-      if (intervals.isEmpty) {
+      if (session == null || session.blocks.isEmpty) {
         setState(() {
           _isLoading = false;
           _errorMessage = 'В этой тренировке нет этапов.';
@@ -62,13 +69,30 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         return;
       }
 
+      // Flatten the workout structure into a linear list of steps
+      for (final block in session.blocks) {
+        for (final set in block.sets) {
+          final exercisesInSet = set.items.whereType<Exercise>().length;
+          int currentExerciseNum = 0;
+          for (int i = 0; i < set.repeat; i++) {
+            for (final item in set.items) {
+              if (item is Exercise) currentExerciseNum++;
+              _workoutPlan.add(
+                TimerStep(
+                  item,
+                  i + 1,
+                  set.repeat,
+                  currentExerciseNum,
+                  exercisesInSet,
+                ),
+              );
+            }
+          }
+        }
+      }
       setState(() {
-        _workoutPlan = intervals;
-        _totalSets = setCount;
-        _totalWorkIntervals =
-            intervals.where((i) => i.kind == IntervalKind.work).length *
-            (_totalSets == 0 ? 1 : _totalSets);
-        _remainingTime = _workoutPlan.first.durationSec;
+        final firstStep = _workoutPlan.first.item;
+        _remainingTime = (firstStep is Rest) ? firstStep.durationSec : 0;
         _isLoading = false;
         // Start paused, waiting for user to press play
       });
@@ -81,50 +105,11 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
     }
   }
 
-  int get _currentWorkExerciseNumber {
-    if (_isWorkoutFinished) return _totalWorkIntervals;
-
-    final workIntervalsPerSet = _workoutPlan
-        .where((i) => i.kind == IntervalKind.work)
-        .length;
-    if (workIntervalsPerSet == 0) return 0;
-
-    int completedWorkInPreviousSets = (_currentSet - 1) * workIntervalsPerSet;
-
-    int workCountInCurrentSet = 0;
-    // Count work intervals up to the *previous* interval index.
-    for (int i = 0; i < _currentIntervalIndex; i++) {
-      if (_workoutPlan[i].kind == IntervalKind.work) {
-        workCountInCurrentSet++;
-      }
-    }
-
-    // If the current interval is NOT a work interval, we show the count of
-    // previously completed work intervals.
-    // If the current interval IS a work interval, we add 1 to the count.
-    if (_workoutPlan[_currentIntervalIndex].kind == IntervalKind.work) {
-      workCountInCurrentSet++;
-    }
-
-    return completedWorkInPreviousSets + workCountInCurrentSet;
-  }
-
-  Interval? get _nextInterval {
-    if (_currentIntervalIndex < _workoutPlan.length - 1) {
-      // Next interval in the current set
-      return _workoutPlan[_currentIntervalIndex + 1];
-    } else if (_currentSet < _totalSets) {
-      // First interval of the next set
-      return _workoutPlan.first;
-    } else {
-      // End of workout
-      return null;
-    }
-  }
-
   void _startTimer() {
     if (_timer != null && _timer!.isActive) return;
-    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
+    final currentItem = _workoutPlan[_currentIntervalIndex].item;
+    if (currentItem is Exercise) {
+      // Exercises are reps-based for now
       return;
     }
     setState(() {
@@ -133,19 +118,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingTime == 5) {
-        // 4 seconds before transition, check next interval
-        Interval? nextInterval;
-        if (_currentIntervalIndex < _workoutPlan.length - 1) {
-          nextInterval = _workoutPlan[_currentIntervalIndex + 1];
-        } else if (_currentSet < _totalSets) {
-          // This is the last interval of a set, check first interval of next set
-          nextInterval = _workoutPlan.first;
-        }
-        if (nextInterval != null &&
-            (nextInterval.kind == IntervalKind.work ||
-                nextInterval.kind == IntervalKind.rest)) {
-          _audioPlayer.play(AssetSource('sounds/start.mp3'));
-        }
+        _audioPlayer.play(AssetSource('sounds/start.mp3'));
       }
       if (_remainingTime > 1) {
         setState(() {
@@ -167,31 +140,22 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   void _moveToNextInterval() {
     HapticFeedback.selectionClick();
     if (_currentIntervalIndex < _workoutPlan.length - 1) {
-      // Move to next interval in the current set
       setState(() {
         _currentIntervalIndex++;
-        _remainingTime = _workoutPlan[_currentIntervalIndex].durationSec;
-      });
-    } else if (_currentSet < _totalSets) {
-      // Move to the next set
-      setState(() {
-        _currentSet++;
-        _currentIntervalIndex = 0;
-        _remainingTime = _workoutPlan[0].durationSec;
+        final currentItem = _workoutPlan[_currentIntervalIndex].item;
+        _remainingTime = (currentItem is Rest) ? currentItem.durationSec : 0;
       });
     } else {
-      // Workout finished
       _timer?.cancel();
       _audioPlayer.play(AssetSource('sounds/finish.mp3'));
       setState(() {
         _isPaused = true;
-        _isWorkoutFinished = true;
       });
       _showCompletionDialog();
       return;
     }
-    // If the new interval is reps-based, pause the timer.
-    if (_workoutPlan[_currentIntervalIndex].isRepsBased) {
+    final currentItem = _workoutPlan[_currentIntervalIndex].item;
+    if (currentItem is Exercise) {
       _pauseTimer();
     } else {
       _startTimer();
@@ -206,20 +170,16 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
     setState(() {
       if (_currentIntervalIndex > 0) {
         _currentIntervalIndex--;
-      } else if (_currentSet > 1) {
-        _currentSet--;
-        _currentIntervalIndex = _workoutPlan.length - 1;
       } else {
-        // This case should be prevented by the UI, but as a safeguard:
         if (!wasPaused) _startTimer(); // Resume if it was playing
         return;
       }
 
-      _remainingTime = _workoutPlan[_currentIntervalIndex].durationSec;
-      _isWorkoutFinished = false;
+      final currentItem = _workoutPlan[_currentIntervalIndex].item;
+      _remainingTime = (currentItem is Rest) ? currentItem.durationSec : 0;
     });
 
-    if (!wasPaused && !_workoutPlan[_currentIntervalIndex].isRepsBased) {
+    if (!wasPaused && _workoutPlan[_currentIntervalIndex].item is Rest) {
       _startTimer();
     }
   }
@@ -243,22 +203,15 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
     );
   }
 
-  Color _getBackgroundColor(IntervalKind kind) {
+  Color _getBackgroundColor(SetItem item) {
     final colors = Theme.of(context).colorScheme;
-    switch (kind) {
-      case IntervalKind.prepare:
-        return colors.tertiaryContainer;
-      case IntervalKind.work:
-        return colors.errorContainer;
-      case IntervalKind.rest:
-        // return colors.primaryContainer;
-        return Theme.of(context).colorScheme.surfaceContainerHigh;
-
-      case IntervalKind.between_sets:
-        return colors.secondaryContainer;
-      default:
-        return Theme.of(context).scaffoldBackgroundColor;
+    if (item is Exercise) {
+      return colors.errorContainer;
     }
+    if (item is Rest) {
+      return Theme.of(context).colorScheme.surfaceContainerHigh;
+    }
+    return Theme.of(context).scaffoldBackgroundColor;
   }
 
   String _formatDuration(int totalSeconds) {
@@ -282,13 +235,14 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       );
     }
 
-    final currentInterval = _workoutPlan[_currentIntervalIndex];
-    final backgroundColor = _getBackgroundColor(currentInterval.kind);
+    final currentStep = _workoutPlan[_currentIntervalIndex];
+    final currentItem = currentStep.item;
+    final backgroundColor = _getBackgroundColor(currentItem);
 
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: Text(widget.workout.title),
+        title: Text(widget.session.name),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -311,7 +265,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         // Back arrow
-                        if (_currentIntervalIndex > 0 || _currentSet > 1)
+                        if (_currentIntervalIndex > 0)
                           IconButton(
                             icon: const Icon(Icons.arrow_back_ios_new),
                             onPressed: _moveToPreviousInterval,
@@ -321,16 +275,15 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                         // Text
                         Semantics(
                           label:
-                              'Упражнение $_currentWorkExerciseNumber из $_totalWorkIntervals',
+                              'Упражнение ${currentStep.currentExerciseInSet} из ${currentStep.totalExercisesInSet}',
                           child: Text(
-                            '$_currentWorkExerciseNumber / $_totalWorkIntervals',
+                            '${currentStep.currentExerciseInSet} / ${currentStep.totalExercisesInSet}',
                             style: Theme.of(context).textTheme.headlineSmall,
                           ),
                         ),
 
                         // Forward arrow
-                        if (_currentIntervalIndex < _workoutPlan.length - 1 ||
-                            _currentSet < _totalSets)
+                        if (_currentIntervalIndex < _workoutPlan.length - 1)
                           IconButton(
                             icon: const Icon(Icons.arrow_forward_ios),
                             onPressed: () {
@@ -343,47 +296,28 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      currentInterval.title ?? currentInterval.kind.name,
-                      style: Theme.of(context).textTheme.headlineMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-
-                    if (currentInterval.description != null &&
-                        currentInterval.description!.isNotEmpty)
+                    if (currentItem is Exercise)
                       Text(
-                        currentInterval.description!,
-                        style: Theme.of(context).textTheme.bodyLarge,
+                        currentItem.name,
+                        style: Theme.of(context).textTheme.headlineMedium,
                         textAlign: TextAlign.center,
                       ),
+                    if (currentItem is Rest)
+                      Text(
+                        currentItem.reason ?? 'Отдых',
+                        style: Theme.of(context).textTheme.headlineMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    const SizedBox(height: 8),
 
-                    if (currentInterval.imageUri != null &&
-                        currentInterval.imageUri!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight:
-                                MediaQuery.of(context).size.height * 0.35,
-                          ),
-                          child: Image.file(
-                            File(currentInterval.imageUri!),
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                      )
-                    else
-                      const SizedBox(height: 16),
-
-                    if (currentInterval.isRepsBased)
+                    if (currentItem is Exercise)
                       Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
-                              '${currentInterval.reps}',
+                              '10', // Placeholder for reps
                               style: Theme.of(context).textTheme.displayLarge
                                   ?.copyWith(
                                     fontSize: 100,
@@ -396,6 +330,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                       )
                     else
                       Column(
+                        // Rest
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FittedBox(
@@ -414,30 +349,8 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
 
                     const SizedBox(height: 16),
 
-                    if ((currentInterval.kind == IntervalKind.rest ||
-                            currentInterval.kind == IntervalKind.between_sets) &&
-                        _nextInterval != null &&
-                        (_nextInterval!.description?.isNotEmpty ?? false))
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('Далее:',
-                                style: Theme.of(context).textTheme.titleMedium),
-                            const SizedBox(height: 4),
-                            Text(
-                              _nextInterval!.description!,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.headlineSmall,
-                            ),
-                          ],
-                        ),
-                      ),
-
                     // Add padding at the bottom so the FAB doesn't overlap content
-                    if (!currentInterval.isRepsBased)
-                      const SizedBox(height: 120),
+                    if (currentItem is Rest) const SizedBox(height: 120),
                   ],
                 ),
               ),
@@ -446,7 +359,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         },
       ),
 
-      floatingActionButton: currentInterval.isRepsBased
+      floatingActionButton: currentItem is Exercise
           ? null
           : FloatingActionButton.large(
               onPressed: () {

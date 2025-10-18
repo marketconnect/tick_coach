@@ -2,12 +2,8 @@ import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:tick_coach/domain/models/chat_message.dart';
-import 'package:tick_coach/domain/models/interval.dart'
-    show Interval, IntervalKind;
-import 'package:tick_coach/domain/models/workout.dart';
-// For Interval and IntervalKind
-
-import 'dart:math';
+import 'dart:convert';
+import 'package:tick_coach/domain/models/training_session.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -25,151 +21,59 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: (db, version) async {
-        await _createDB(db, version);
-        await _createDefaultWorkouts(db);
-      },
-    );
-  }
-
-  Future<void> _createDefaultWorkouts(Database db) async {
-    String newId() =>
-        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
-    await db.transaction((txn) async {
-      // Workout 1: Разминка
-      final workout1Id = 'default_warmup';
-      await txn.insert('workouts', {
-        'id': workout1Id,
-        'title': 'Разминка',
-        'set_count': 1,
-      });
-      final warmupIntervals = [
-        Interval(
-          id: newId(),
-          kind: IntervalKind.work,
-          durationSec: 30,
-          title: 'Работа',
-          description:
-              'круговые движения суставов (шея, плечи, таз, колени, голеностоп)',
-        ),
-        Interval(
-          id: newId(),
-          kind: IntervalKind.work,
-          durationSec: 60,
-          title: 'Работа',
-          description: 'шаг и присед к стулу (частичная амплитуда)',
-        ),
-        Interval(
-          id: newId(),
-          kind: IntervalKind.work,
-          durationSec: 60,
-          title: 'Работа',
-          description: 'выпады назад попеременно (медленно)',
-        ),
-        Interval(
-          id: newId(),
-          kind: IntervalKind.work,
-          durationSec: 30,
-          title: 'Работа',
-          description: 'лёгкие прыжки на месте или марш на месте',
-        ),
-      ];
-      for (int i = 0; i < warmupIntervals.length; i++) {
-        final interval = warmupIntervals[i];
-        await txn.insert('intervals', {
-          'id': interval.id,
-          'workout_id': workout1Id,
-          'kind': interval.kind.name,
-          'title': interval.title,
-          'description': interval.description,
-          'duration_sec': interval.durationSec,
-          'reps': interval.reps,
-          'is_reps_based': interval.isRepsBased ? 1 : 0,
-          'image_uri': interval.imageUri,
-          'sort_order': i,
-        });
-      }
-      // Workout 2: Тренировка
-      final workout2Id = 'default_tabata';
-      await txn.insert('workouts', {
-        'id': workout2Id,
-        'title': 'Тренировка',
-        'set_count': 1,
-      });
-      List<Interval> tabataIntervals = [];
-      final tabataDescriptions = [
-        'Планка на прямых руках',
-        'Шаги на месте с высоким подъемом бедра',
-        'Скручивания на пресс',
-        'Глубокие приседания',
-      ];
-      for (int i = 0; i < tabataDescriptions.length; i++) {
-        for (int j = 0; j < 8; j++) {
-          tabataIntervals.add(
-            Interval(
-              id: newId(),
-              kind: IntervalKind.work,
-              durationSec: 20,
-              title: 'Работа',
-              description: tabataDescriptions[i],
-            ),
-          );
-          tabataIntervals.add(
-            Interval(
-              id: newId(),
-              kind: IntervalKind.rest,
-              durationSec: 10,
-              title: 'Отдых',
-            ),
-          );
-        }
-        if (i < tabataDescriptions.length - 1) {
-          tabataIntervals.removeLast();
-          tabataIntervals.add(
-            Interval(
-              id: newId(),
-              kind: IntervalKind.between_sets,
-              durationSec: 60,
-              title: 'Отдых между сетами',
-            ),
-          );
-        }
-      }
-      tabataIntervals.removeLast();
-      for (int i = 0; i < tabataIntervals.length; i++) {
-        final interval = tabataIntervals[i];
-        await txn.insert('intervals', _intervalToMap(interval, workout2Id, i));
-      }
-    });
+    return await openDatabase(path, version: 1, onCreate: _createDB);
   }
 
   Future _createDB(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE workouts(
+      CREATE TABLE training_sessions(
         id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        set_count INTEGER NOT NULL,
+        name TEXT NOT NULL,
         notes TEXT
       )
     ''');
 
     await db.execute('''
-      CREATE TABLE intervals(
+      CREATE TABLE blocks(
         id TEXT PRIMARY KEY,
-        workout_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        title TEXT,
-        description TEXT,
-        duration_sec INTEGER NOT NULL,
-        reps INTEGER NOT NULL,
-        is_reps_based INTEGER NOT NULL,
-        image_uri TEXT,
+        session_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        label TEXT,
         sort_order INTEGER NOT NULL,
-        FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE CASCADE
-      )
+             FOREIGN KEY (session_id) REFERENCES training_sessions (id) ON DELETE CASCADE
+   )
+ ''');
+    await db.execute('''
+   CREATE TABLE sets(
+     id TEXT PRIMARY KEY,
+     block_id TEXT NOT NULL,
+     repeat INTEGER NOT NULL,
+     label TEXT,
+     sort_order INTEGER NOT NULL,
+     FOREIGN KEY (block_id) REFERENCES blocks (id) ON DELETE CASCADE
+   )
+ ''');
+    await db.execute('''
+      CREATE TABLE set_items(
+        id TEXT PRIMARY KEY,
+        set_id TEXT NOT NULL,
+        type TEXT NOT NULL, -- 'exercise' or 'rest'
+        sort_order INTEGER NOT NULL,
+        
+        -- Common fields
+        name TEXT, -- for exercise
+        duration_sec INTEGER, -- for rest
+        -- Exercise specific fields
+        modality TEXT,
+        equipment TEXT,
+        load_kg REAL,
+        tempo TEXT,
+        repetitions_json TEXT,
+        holds_json TEXT,
+        -- Rest specific fields
+        reason TEXT,
+        FOREIGN KEY (set_id) REFERENCES sets (id) ON DELETE CASCADE
+          )
     ''');
 
     await db.execute('''
@@ -182,161 +86,209 @@ class DatabaseHelper {
     ''');
   }
 
-  Future<void> saveWorkout(
-    Workout workout,
-    List<Interval> intervals,
-    int setCount,
-  ) async {
+  Future<void> saveTrainingSession(TrainingSession session) async {
     final db = await instance.database;
 
     await db.transaction((txn) async {
-      // Upsert workout
-      await txn.insert('workouts', {
-        'id': workout.id,
-        'title': workout.title,
-        'set_count': setCount,
-        'notes': workout.notes,
+      // Upsert session
+      await txn.insert('training_sessions', {
+        'id': session.id,
+        'name': session.name,
+        'notes': session.notes,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
-
-      // Delete old intervals for this workout
+      // Delete old children
+      final blockIds = (await txn.query(
+        'blocks',
+        columns: ['id'],
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      )).map((row) => row['id'] as String).toList();
+      if (blockIds.isNotEmpty) {
+        final setIds = (await txn.query(
+          'sets',
+          columns: ['id'],
+          where: 'block_id IN (${List.filled(blockIds.length, '?').join(',')})',
+          whereArgs: blockIds,
+        )).map((row) => row['id'] as String).toList();
+        if (setIds.isNotEmpty) {
+          await txn.delete(
+            'set_items',
+            where: 'set_id IN (${List.filled(setIds.length, '?').join(',')})',
+            whereArgs: setIds,
+          );
+        }
+        await txn.delete(
+          'sets',
+          where: 'block_id IN (${List.filled(blockIds.length, '?').join(',')})',
+          whereArgs: blockIds,
+        );
+      }
       await txn.delete(
-        'intervals',
-        where: 'workout_id = ?',
-        whereArgs: [workout.id],
+        'blocks',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
       );
-
-      // Insert new intervals
-      for (int i = 0; i < intervals.length; i++) {
-        final interval = intervals[i];
-        await txn.insert('intervals', _intervalToMap(interval, workout.id, i));
+      // Insert new children
+      for (int i = 0; i < session.blocks.length; i++) {
+        final block = session.blocks[i];
+        await txn.insert('blocks', {
+          'id': block.id,
+          'session_id': session.id,
+          'type': block.type,
+          'label': block.label,
+          'sort_order': i,
+        });
+        for (int j = 0; j < block.sets.length; j++) {
+          final set = block.sets[j];
+          await txn.insert('sets', {
+            'id': set.id,
+            'block_id': block.id,
+            'repeat': set.repeat,
+            'label': set.label,
+            'sort_order': j,
+          });
+          for (int k = 0; k < set.items.length; k++) {
+            final item = set.items[k];
+            Map<String, dynamic> itemData = {
+              'id': item.id,
+              'set_id': set.id,
+              'sort_order': k,
+            };
+            if (item is Exercise) {
+              itemData.addAll({
+                'type': 'exercise',
+                'name': item.name,
+                'modality': item.modality,
+                'equipment': item.equipment,
+                'load_kg': item.loadKg,
+                'tempo': item.tempo,
+                'repetitions_json': jsonEncode(
+                  item.repetitions.map((r) => r.toJson()).toList(),
+                ),
+                'holds_json': jsonEncode(
+                  item.holds.map((h) => h.toJson()).toList(),
+                ),
+              });
+            } else if (item is Rest) {
+              itemData.addAll({
+                'type': 'rest',
+                'duration_sec': item.durationSec,
+                'reason': item.reason,
+              });
+            }
+            await txn.insert('set_items', itemData);
+          }
+        }
       }
     });
   }
 
-  Map<String, dynamic> _intervalToMap(
-    Interval interval,
-    String workoutId,
-    int order,
-  ) => {
-    'id': interval.id,
-    'workout_id': workoutId,
-    'kind': interval.kind.name,
-    'title': interval.title,
-    'description': interval.description,
-    'duration_sec': interval.durationSec,
-    'reps': interval.reps,
-    'is_reps_based': interval.isRepsBased ? 1 : 0,
-    'image_uri': interval.imageUri,
-    'sort_order': order,
-  };
-  Future<List<Interval>> getIntervalsForWorkout(String workoutId) async {
+  Future<TrainingSession?> getTrainingSession(String sessionId) async {
     final db = await instance.database;
-    final maps = await db.query(
-      'intervals',
-      where: 'workout_id = ?',
-      whereArgs: [workoutId],
+    final sessionMaps = await db.query(
+      'training_sessions',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
+    if (sessionMaps.isEmpty) return null;
+    final sessionMap = sessionMaps.first;
+    final session = TrainingSession(
+      id: sessionMap['id'] as String,
+      name: sessionMap['name'] as String,
+      notes: sessionMap['notes'] as String?,
+    );
+    final blockMaps = await db.query(
+      'blocks',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
       orderBy: 'sort_order ASC',
     );
-
-    if (maps.isEmpty) {
-      return [];
-    }
-
-    return maps
-        .map(
-          (json) => Interval(
-            id: json['id'] as String,
-            kind: IntervalKind.values.byName(json['kind'] as String),
-            title: json['title'] as String?,
-            description: json['description'] as String?,
-            durationSec: json['duration_sec'] as int,
-            reps: json['reps'] as int,
-            isRepsBased: (json['is_reps_based'] as int) == 1,
-            imageUri: json['image_uri'] as String?,
-          ),
-        )
-        .toList();
-  }
-
-  Future<int> getSetCountForWorkout(String workoutId) async {
-    final db = await instance.database;
-    final maps = await db.query(
-      'workouts',
-      columns: ['set_count'],
-      where: 'id = ?',
-      whereArgs: [workoutId],
-    );
-
-    if (maps.isNotEmpty) {
-      return maps.first['set_count'] as int;
-    } else {
-      return 1; // Default value
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getAllWorkouts() async {
-    final db = await instance.database;
-    return await db.query('workouts', orderBy: 'title');
-  }
-
-  Future<void> updateWorkoutNotes(String workoutId, String notes) async {
-    final db = await instance.database;
-    await db.update(
-      'workouts',
-      {'notes': notes},
-      where: 'id = ?',
-      whereArgs: [workoutId],
-    );
-  }
-
-  Future<void> duplicateWorkout(String workoutId) async {
-    final db = await instance.database;
-
-    await db.transaction((txn) async {
-      // 1. Get original workout
-      final originalWorkoutMaps = await txn.query(
-        'workouts',
-        where: 'id = ?',
-        whereArgs: [workoutId],
+    for (final blockMap in blockMaps) {
+      final block = Block(
+        id: blockMap['id'] as String,
+        type: blockMap['type'] as String,
+        label: blockMap['label'] as String?,
       );
-      if (originalWorkoutMaps.isEmpty) {
-        return;
-      }
-      final originalWorkoutMap = originalWorkoutMaps.first;
-
-      // 2. Get original intervals
-      final originalIntervalMaps = await txn.query(
-        'intervals',
-        where: 'workout_id = ?',
-        whereArgs: [workoutId],
+      session.blocks.add(block);
+      final setMaps = await db.query(
+        'sets',
+        where: 'block_id = ?',
+        whereArgs: [block.id],
         orderBy: 'sort_order ASC',
       );
-
-      // 3. Create new workout
-      final newWorkoutId =
-          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
-      final newWorkoutTitle = 'Копия ${originalWorkoutMap['title']}';
-
-      final newWorkoutData = Map<String, dynamic>.from(originalWorkoutMap);
-      newWorkoutData['id'] = newWorkoutId;
-      newWorkoutData['title'] = newWorkoutTitle;
-
-      await txn.insert('workouts', newWorkoutData);
-
-      // 4. Create and insert new intervals
-      for (final originalIntervalMap in originalIntervalMaps) {
-        final newIntervalData = Map<String, dynamic>.from(originalIntervalMap);
-        newIntervalData['id'] =
-            '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}_${originalIntervalMap['sort_order']}';
-        newIntervalData['workout_id'] = newWorkoutId;
-        await txn.insert('intervals', newIntervalData);
+      for (final setMap in setMaps) {
+        final set = Set(
+          id: setMap['id'] as String,
+          repeat: setMap['repeat'] as int,
+          label: setMap['label'] as String?,
+        );
+        block.sets.add(set);
+        final itemMaps = await db.query(
+          'set_items',
+          where: 'set_id = ?',
+          whereArgs: [set.id],
+          orderBy: 'sort_order ASC',
+        );
+        for (final itemMap in itemMaps) {
+          final type = itemMap['type'] as String;
+          if (type == 'exercise') {
+            set.items.add(
+              Exercise(
+                id: itemMap['id'] as String,
+                name: itemMap['name'] as String,
+                modality: itemMap['modality'] as String?,
+                equipment: itemMap['equipment'] as String?,
+                loadKg: itemMap['load_kg'] as double?,
+                tempo: itemMap['tempo'] as String?,
+                repetitions:
+                    (jsonDecode(itemMap['repetitions_json'] as String) as List)
+                        .map((r) => Repetition(index: r['index']))
+                        .toList(),
+                holds: (jsonDecode(itemMap['holds_json'] as String) as List)
+                    .map((h) => Hold(durationSec: h['duration_sec']))
+                    .toList(),
+              ),
+            );
+          } else if (type == 'rest') {
+            set.items.add(
+              Rest(
+                id: itemMap['id'] as String,
+                durationSec: itemMap['duration_sec'] as int,
+                reason: itemMap['reason'] as String?,
+              ),
+            );
+          }
+        }
       }
-    });
+    }
+    return session;
   }
 
-  Future<void> deleteWorkout(String workoutId) async {
+  Future<List<Map<String, dynamic>>> getAllTrainingSessions() async {
     final db = await instance.database;
-    await db.delete('workouts', where: 'id = ?', whereArgs: [workoutId]);
+    return await db.query('training_sessions', orderBy: 'name');
+  }
+
+  Future<void> updateTrainingSessionNotes(
+    String sessionId,
+    String notes,
+  ) async {
+    final db = await instance.database;
+    await db.update(
+      'training_sessions',
+      {'notes': notes},
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
+  }
+
+  Future<void> deleteTrainingSession(String sessionId) async {
+    final db = await instance.database;
+    await db.delete(
+      'training_sessions',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
   }
 
   Future<void> saveChatMessage(ChatMessage message) async {

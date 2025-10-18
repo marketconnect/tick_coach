@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:tick_coach/domain/models/workout.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
 import '../utils/database_helper.dart';
 
 class WorkoutNotesScreen extends StatefulWidget {
-  final Workout workout;
+  final TrainingSession session;
 
-  const WorkoutNotesScreen({super.key, required this.workout});
+  const WorkoutNotesScreen({super.key, required this.session});
 
   @override
   State<WorkoutNotesScreen> createState() => _WorkoutNotesScreenState();
@@ -18,7 +18,7 @@ class _WorkoutNotesScreenState extends State<WorkoutNotesScreen> {
   @override
   void initState() {
     super.initState();
-    _notesController = TextEditingController(text: widget.workout.notes);
+    _notesController = TextEditingController(text: widget.session.notes);
   }
 
   @override
@@ -31,8 +31,8 @@ class _WorkoutNotesScreenState extends State<WorkoutNotesScreen> {
     final notes = _notesController.text.trim();
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await DatabaseHelper.instance.updateWorkoutNotes(
-        widget.workout.id,
+      await DatabaseHelper.instance.updateTrainingSessionNotes(
+        widget.session.id,
         notes,
       );
       if (!mounted) return;

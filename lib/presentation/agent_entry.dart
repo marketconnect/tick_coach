@@ -1,15 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
+
 import 'dart:math';
-import 'package:flutter/material.dart' hide Interval;
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tick_coach/conf.dart';
 import 'package:tick_coach/domain/models/chat_message.dart';
-import 'package:tick_coach/domain/models/interval.dart';
-import 'package:tick_coach/domain/models/workout.dart';
 import 'package:tick_coach/presentation/edit_workout_screen.dart';
 import 'package:tick_coach/utils/database_helper.dart';
 import 'package:tick_coach/utils/websocket_service.dart';
+import 'package:xml/xml.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
 
 class AgentEntry extends StatefulWidget {
   const AgentEntry({super.key});
@@ -64,33 +64,74 @@ class _AgentEntryState extends State<AgentEntry> {
       ChatMessage assistantMessage;
 
       try {
-        // Пытаемся распарсить JSON
-        final decoded = jsonDecode(data);
-
-        // Проверяем, что это объект и тип 'workout'
-        if (decoded is Map<String, dynamic> && decoded['type'] == 'workout') {
-          final workoutData = decoded['workout'];
-          final List<Interval> intervals = (workoutData['intervals'] as List)
-              .map((i) {
-                return Interval(
-                  id: _generateId(), // Генерируем новый ID
-                  kind: IntervalKind.values.byName(i['kind']),
-                  title: i['title'],
-                  description: i['description'],
-                  durationSec: i['durationSec'] ?? 0,
-                  reps: i['reps'] ?? 10,
-                  isRepsBased: i['isRepsBased'] ?? false,
-                );
-              })
-              .toList();
-
-          final workout = Workout(
-            id: _generateId(), // Генерируем новый ID
-            title: workoutData['title'],
-            repeats: workoutData['set_count'],
-            previewLines: [],
-            totalTime: Duration.zero,
-            intervalsCount: 0,
+        // Пытаемся распарсить XML
+        final xmlDocument = XmlDocument.parse(data);
+        final trainingSessionElement = xmlDocument.getElement(
+          'TrainingSession',
+        );
+        if (trainingSessionElement != null) {
+          final trainingSession = TrainingSession(
+            id: trainingSessionElement.getAttribute('id') ?? _generateId(),
+            name:
+                trainingSessionElement.getAttribute('name') ??
+                'Новая тренировка',
+            blocks: trainingSessionElement.findElements('Block').map((
+              blockElement,
+            ) {
+              return Block(
+                id: _generateId(),
+                type: blockElement.getAttribute('type') ?? 'Unknown',
+                label: blockElement.getAttribute('label'),
+                sets: blockElement.findElements('Set').map((setElement) {
+                  final repeatCount =
+                      int.tryParse(
+                        setElement
+                                .getElement('Repeat')
+                                ?.getAttribute('rounds') ??
+                            '1',
+                      ) ??
+                      1;
+                  return Set(
+                    id: _generateId(),
+                    label: setElement.getAttribute('label'),
+                    repeat: repeatCount,
+                    items: setElement.childElements
+                        .where(
+                          (el) => ['Exercise', 'Rest'].contains(el.name.local),
+                        )
+                        .map((itemElement) {
+                          if (itemElement.name.local == 'Exercise') {
+                            return Exercise(
+                              id: _generateId(),
+                              name:
+                                  itemElement.getAttribute('name') ??
+                                  'Упражнение',
+                              modality: itemElement.getAttribute('modality'),
+                              equipment: itemElement.getAttribute('equipment'),
+                              loadKg: double.tryParse(
+                                itemElement.getAttribute('load_kg') ?? '',
+                              ),
+                              tempo: itemElement.getAttribute('tempo'),
+                              // MVP: Reps/Holds are not parsed in detail from XML yet
+                            );
+                          } else {
+                            // Rest
+                            return Rest(
+                              id: _generateId(),
+                              durationSec:
+                                  int.tryParse(
+                                    itemElement.getAttribute('seconds') ?? '0',
+                                  ) ??
+                                  0,
+                              reason: itemElement.getAttribute('reason'),
+                            );
+                          }
+                        })
+                        .toList(),
+                  );
+                }).toList(),
+              );
+            }).toList(),
           );
 
           assistantMessage = ChatMessage(
@@ -98,11 +139,10 @@ class _AgentEntryState extends State<AgentEntry> {
             sender: MessageSender.assistant,
             timestamp: DateTime.now(),
             type: MessageType.workout,
-            workout: workout,
-            intervals: intervals,
+            trainingSession: trainingSession,
           );
         } else {
-          // Если это не JSON тренировки, считаем текстом
+          // сли это не XML тренировки, считаем текстом
           assistantMessage = ChatMessage(
             id: _generateId(),
             text: data,
@@ -208,8 +248,7 @@ class _AgentEntryState extends State<AgentEntry> {
                     return _TextMessageBubble(message: message);
                   case MessageType.workout:
                     return _WorkoutMessageBubble(
-                      workout: message.workout!,
-                      intervals: message.intervals!,
+                      trainingSession: message.trainingSession!,
                     );
                 }
               },
@@ -312,10 +351,8 @@ class _TextMessageBubble extends StatelessWidget {
 
 // Новый виджет для отображения тренировки
 class _WorkoutMessageBubble extends StatelessWidget {
-  final Workout workout;
-  final List<Interval> intervals;
-
-  const _WorkoutMessageBubble({required this.workout, required this.intervals});
+  final TrainingSession trainingSession;
+  const _WorkoutMessageBubble({required this.trainingSession});
 
   @override
   Widget build(BuildContext context) {
@@ -333,10 +370,10 @@ class _WorkoutMessageBubble extends StatelessWidget {
             children: [
               Text('Готовая тренировка:', style: theme.textTheme.labelMedium),
               const SizedBox(height: 4),
-              Text(workout.title, style: theme.textTheme.titleLarge),
+              Text(trainingSession.name, style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('Сеты: ${workout.repeats ?? 1}'),
-              Text('Упражнений в сете: ${intervals.length}'),
+              Text('Блоков: ${trainingSession.blocks.length}'),
+              // Could add more details here
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
@@ -346,10 +383,8 @@ class _WorkoutMessageBubble extends StatelessWidget {
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (context) => EditWorkoutScreen(
-                          workout: workout,
-                          initialIntervals: intervals,
-                        ),
+                        builder: (context) =>
+                            EditWorkoutScreen(trainingSession: trainingSession),
                       ),
                     );
                   },
