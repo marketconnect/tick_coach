@@ -48,6 +48,8 @@ dependencies:
       ref: master
   path_provider: ^2.0.11
   archive: ^3.3.0
+  provider: ^6.1.5+1
+
       
 dev_dependencies:
   flutter_test:

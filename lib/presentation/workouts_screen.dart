@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
 import 'edit_workout_screen.dart';
 import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
 import 'workout_preview_screen.dart';
 import 'agent_entry.dart';
-import '../utils/database_helper.dart';
 
 // The main screen widget
 class WorkoutsScreen extends StatefulWidget {
@@ -39,11 +40,11 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
       _errorMessage = null;
     });
     try {
-      final dbHelper = DatabaseHelper.instance;
-      final sessionsData = await dbHelper.getAllTrainingSessions();
+      final repo = Provider.of<WorkoutRepository>(context, listen: false);
+      final sessionsData = await repo.getAllTrainingSessions();
       final List<TrainingSession> loadedSessions = [];
       for (final sessionMap in sessionsData) {
-        final session = await dbHelper.getTrainingSession(
+        final session = await repo.getTrainingSession(
           sessionMap['id'] as String,
         );
         if (session != null) {
@@ -201,11 +202,11 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
   Future<void> _createSequence() async {
     if (_selectedSessions.isEmpty) return;
 
-    final dbHelper = DatabaseHelper.instance;
+    final repo = Provider.of<WorkoutRepository>(context, listen: false);
     final List<Block> sequenceBlocks = [];
 
     for (final session in _selectedSessions) {
-      final fullSession = await dbHelper.getTrainingSession(session.id);
+      final fullSession = await repo.getTrainingSession(session.id);
       if (fullSession != null) {
         // Just add all blocks from the selected session
         sequenceBlocks.addAll(fullSession.blocks);
@@ -412,8 +413,11 @@ class TrainingSessionCard extends StatelessWidget {
                                   ),
                                 );
                                 if (confirmed == true) {
-                                  await DatabaseHelper.instance
-                                      .deleteTrainingSession(session.id);
+                                  final repo = Provider.of<WorkoutRepository>(
+                                    context,
+                                    listen: false,
+                                  );
+                                  await repo.deleteTrainingSession(session.id);
                                   onWorkoutUpdated();
                                 }
                                 break;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
-import 'package:tick_coach/utils/database_helper.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
 
 class WorkoutPreviewScreen extends StatefulWidget {
   final TrainingSession session;
@@ -28,9 +29,8 @@ class _WorkoutPreviewScreenState extends State<WorkoutPreviewScreen> {
       _errorMessage = null;
     });
     try {
-      final session = await DatabaseHelper.instance.getTrainingSession(
-        widget.session.id,
-      );
+      final repo = Provider.of<WorkoutRepository>(context, listen: false);
+      final session = await repo.getTrainingSession(widget.session.id);
       if (!mounted) return;
       setState(() {
         _fullSession = session;

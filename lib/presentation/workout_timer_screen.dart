@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
-import '../utils/database_helper.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
 
 class TimerStep {
   final SetItem item;
@@ -56,9 +57,8 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
 
   Future<void> _loadWorkoutData() async {
     try {
-      final session = await DatabaseHelper.instance.getTrainingSession(
-        widget.session.id,
-      );
+      final repo = Provider.of<WorkoutRepository>(context, listen: false);
+      final session = await repo.getTrainingSession(widget.session.id);
 
       if (!mounted) return;
       if (session == null || session.blocks.isEmpty) {

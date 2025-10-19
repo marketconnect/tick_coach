@@ -1,131 +1,57 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
-import 'package:vosk_flutter/vosk_flutter.dart';
 import 'dart:async';
-
-import '../utils/database_helper.dart';
+import 'package:provider/provider.dart';
+import 'package:tick_coach/application/edit_workout_notifier.dart';
+import 'package:tick_coach/data/services/vosk_service.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
 
 import 'dart:io';
-import 'package:image_picker/image_picker.dart';
-import 'dart:math';
-import 'package:path_provider/path_provider.dart';
-import 'package:archive/archive.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'dart:convert';
 
-class EditWorkoutScreen extends StatefulWidget {
+import 'dart:math';
+
+class EditWorkoutScreen extends StatelessWidget {
   final TrainingSession trainingSession;
   const EditWorkoutScreen({super.key, required this.trainingSession});
-
   @override
-  State<EditWorkoutScreen> createState() => _EditWorkoutScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (context) => EditWorkoutNotifier(
+        context.read<WorkoutRepository>(),
+        context.read<VoskService>(),
+        trainingSession,
+      ),
+      child: const _EditWorkoutScreenView(),
+    );
+  }
 }
 
-class _EditWorkoutScreenState extends State<EditWorkoutScreen>
-    with TickerProviderStateMixin {
-  bool _isLoading = true;
-  String? _errorMessage;
-  late TrainingSession _session;
+class _EditWorkoutScreenView extends StatefulWidget {
+  const _EditWorkoutScreenView();
+
+  @override
+  State<_EditWorkoutScreenView> createState() => _EditWorkoutScreenViewState();
+}
+
+class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
   final _scrollController = ScrollController();
-  // VOSK variables
-  VoskFlutterPlugin? _vosk;
-  Model? _model;
-  Recognizer? _recognizer;
-  SpeechService? _speechService;
-  StreamSubscription<String>? _resultSubscription;
-  bool _isModelLoading = true;
-  bool _isListening = false;
 
   @override
   void initState() {
     super.initState();
-    _session = widget.trainingSession;
-    _isLoading = false; // Data is passed in directly
-    _initVosk();
   }
-
-  Future<void> _initVosk() async {
-    _vosk = VoskFlutterPlugin.instance();
-    try {
-      final modelPath = await _loadModelFromAssets();
-      _model = await _vosk!.createModel(modelPath);
-      _recognizer = await _vosk!.createRecognizer(
-        model: _model!,
-        sampleRate: 16000,
-      );
-
-      _speechService = await _vosk!.initSpeechService(_recognizer!);
-      _resultSubscription = _speechService!.onResult().listen((result) {
-        final jsonResult = jsonDecode(result);
-        final text = jsonResult['text'] as String?;
-        if (text != null && text.isNotEmpty) {
-          _handleVoiceCommand(text);
-        }
-        // Stop listening and update UI after a final result is received.
-        _speechService?.stop();
-        if (mounted) {
-          setState(() {
-            _isListening = false;
-          });
-        }
-      });
-
-      if (!mounted) return;
-      setState(() {
-        _isModelLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isModelLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка инициализации модели: ${e.toString()}')),
-      );
-    }
-  }
-
-  Future<String> _loadModelFromAssets() async {
-    final tempDir = await getTemporaryDirectory();
-    final modelDir = Directory('${tempDir.path}/vosk_model_ru');
-
-    if (!await modelDir.exists()) {
-      await modelDir.create(recursive: true);
-      final assetData = await rootBundle.load(
-        'assets/models/vosk-model-small-ru-0.22.zip',
-      );
-      final bytes = assetData.buffer.asUint8List();
-      final archive = ZipDecoder().decodeBytes(bytes);
-
-      for (final file in archive) {
-        final filename = '${modelDir.path}/${file.name}';
-        if (file.isFile) {
-          final outFile = File(filename);
-          await outFile.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
-        } else {
-          await Directory(filename).create(recursive: true);
-        }
-      }
-    }
-    // The path to the unzipped directory inside the model archive
-    return '${modelDir.path}/vosk-model-small-ru-0.22';
-  }
-
-  String _generateId() =>
-      '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
 
   @override
   void dispose() {
     _scrollController.dispose();
-    _speechService?.stop();
-    _resultSubscription?.cancel();
+
     super.dispose();
   }
 
-  Future<void> _showEditTitleDialog() async {
-    final controller = TextEditingController(text: _session.name);
+  Future<void> _showEditTitleDialog(EditWorkoutNotifier notifier) async {
+    final controller = TextEditingController(text: notifier.session.name);
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -155,157 +81,14 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
       ),
     );
     if (result != null && result.isNotEmpty) {
-      setState(() => _session.name = result);
+      notifier.updateSessionName(result);
     }
   }
 
-  Future<void> _toggleListening() async {
-    if (_isModelLoading || _speechService == null) return;
-
-    if (_isListening) {
-      await _speechService!.stop();
-      setState(() {
-        _isListening = false;
-      });
-    } else {
-      try {
-        await _speechService!.start();
-        setState(() {
-          _isListening = true;
-        });
-      } catch (e) {
-        // silent
-      }
-    }
-  }
-
-  void _handleVoiceCommand(String command) {
-    if (command.isEmpty) return;
-    command = command.toLowerCase();
-
-    // Synonyms
-    command = command.replaceAll('повторений', 'раз');
-    command = command.replaceAll('повторов', 'раз');
-    command = command.replaceAll('килограмм', 'кг');
-
-    // 1. Add Block
-    if (command.contains('блок')) {
-      String type = 'Основная часть';
-      if (command.contains('разминка')) type = 'Разминка';
-      if (command.contains('заминка')) type = 'Заминка';
-
-      setState(() {
-        _session.blocks.add(Block(id: _generateId(), type: type, sets: []));
-      });
-      return;
-    }
-
-    // 2. Add Set
-    if (command.contains('сет')) {
-      var lastBlock = _session.blocks.lastOrNull;
-      if (lastBlock == null) {
-        lastBlock = Block(id: _generateId(), type: 'Основная часть', sets: []);
-        _session.blocks.add(lastBlock);
-      }
-
-      int repeat = 1;
-      final repeatMatch = RegExp(
-        r'(\d+)\s+(?:раз|круга|круг)',
-      ).firstMatch(command);
-      if (repeatMatch != null) {
-        repeat = int.tryParse(repeatMatch.group(1)!) ?? 1;
-      }
-
-      String? label;
-      if (command.contains('суперсет')) label = 'Суперсет';
-      if (command.contains('трисет')) label = 'Трисет';
-
-      setState(() {
-        lastBlock!.sets.add(
-          Set(id: _generateId(), items: [], repeat: repeat, label: label),
-        );
-      });
-      return;
-    }
-
-    // 3. Add Rest
-    if (command.startsWith('отдых')) {
-      final durationMatch = RegExp(r'(\d+)\s+секунд').firstMatch(command);
-      int duration = 60;
-      if (durationMatch != null) {
-        duration = int.tryParse(durationMatch.group(1)!) ?? 60;
-      }
-
-      _addItemToLastSet(Rest(id: _generateId(), durationSec: duration));
-      return;
-    }
-
-    // 4. Add Exercise
-    var processedCommand = command
-        .replaceFirst('добавь', '')
-        .replaceFirst('новое упражнение', '')
-        .trim();
-
-    if (processedCommand == 'упражнение') {
-      _addItemToLastSet(Exercise(id: _generateId(), name: 'Новое упражнение'));
-      return;
-    }
-
-    int? reps;
-    final repsMatch = RegExp(r'(\d+)\s+раз').firstMatch(processedCommand);
-    if (repsMatch != null) {
-      reps = int.tryParse(repsMatch.group(1)!);
-      processedCommand = processedCommand
-          .replaceAll(repsMatch.group(0)!, '')
-          .trim();
-    }
-
-    double? loadKg;
-    final loadMatch = RegExp(
-      r'(\d+(?:\.|\,)?\d*)\s+кг',
-    ).firstMatch(processedCommand);
-    if (loadMatch != null) {
-      loadKg = double.tryParse(loadMatch.group(1)!.replaceAll(',', '.'));
-      processedCommand = processedCommand
-          .replaceAll(loadMatch.group(0)!, '')
-          .trim();
-    }
-
-    final name = processedCommand.isNotEmpty
-        ? processedCommand
-        : 'Новое упражнение';
-
-    _addItemToLastSet(
-      Exercise(
-        id: _generateId(),
-        name: name.capitalize(),
-        reps: reps ?? 10,
-        loadKg: loadKg,
-      ),
-    );
-  }
-
-  void _addItemToLastSet(SetItem item) {
-    setState(() {
-      var lastSet = _session.blocks.lastOrNull?.sets.lastOrNull;
-      if (lastSet == null) {
-        var lastBlock = _session.blocks.lastOrNull;
-        if (lastBlock == null) {
-          lastBlock = Block(
-            id: _generateId(),
-            type: 'Основная часть',
-            sets: [],
-          );
-          _session.blocks.add(lastBlock);
-        }
-        lastSet = Set(id: _generateId(), items: []);
-        lastBlock.sets.add(lastSet);
-      }
-      lastSet.items.add(item);
-    });
-  }
-
-  Future<void> _showEditBlockLabelDialog(Block block) async {
+  Future<void> _showEditBlockLabelDialog(
+    EditWorkoutNotifier notifier,
+    Block block,
+  ) async {
     final controller = TextEditingController(text: block.label ?? block.type);
     final result = await showDialog<String>(
       context: context,
@@ -336,111 +119,14 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
       ),
     );
     if (result != null && result.isNotEmpty) {
-      setState(() => block.label = result);
+      notifier.updateBlockLabel(block, result);
     }
   }
 
-  void _addBlock() {
-    setState(() {
-      _session.blocks.add(
-        Block(id: _generateId(), type: 'Основная часть', sets: []),
-      );
-    });
-  }
-
-  void _addSet(Block block) {
-    setState(() {
-      block.sets.add(Set(id: _generateId(), items: []));
-    });
-  }
-
-  void _addExercise(Set set) {
-    setState(() {
-      set.items.add(Exercise(id: _generateId(), name: 'Новое упражнение'));
-    });
-  }
-
-  void _insertItem(Set targetSet, int index, SetItem item) {
-    setState(() {
-      targetSet.items.insert(index, item);
-    });
-  }
-
-  void _duplicateBlock(int blockIndex) {
-    setState(() {
-      final originalBlock = _session.blocks[blockIndex];
-      final newBlock = Block(
-        id: _generateId(),
-        type: originalBlock.type,
-        label: originalBlock.label,
-        sets: originalBlock.sets.map((s) {
-          return s.copyWith(
-            id: _generateId(),
-            items: s.items.map((i) => i.copyWith(id: _generateId())).toList(),
-          );
-        }).toList(),
-      );
-      _session.blocks.insert(blockIndex + 1, newBlock);
-    });
-  }
-
-  void _duplicateSet(Block block, Set originalSet) {
-    setState(() {
-      final newSet = originalSet.copyWith(
-        id: _generateId(),
-        items: originalSet.items
-            .map((i) => i.copyWith(id: _generateId()))
-            .toList(),
-      );
-      final originalIndex = block.sets.indexOf(originalSet);
-      block.sets.insert(originalIndex + 1, newSet);
-    });
-  }
-
-  void _duplicateItem(Set set, SetItem originalItem) {
-    setState(() {
-      final newItem = originalItem.copyWith(id: _generateId());
-      final originalIndex = set.items.indexOf(originalItem);
-      set.items.insert(originalIndex + 1, newItem);
-    });
-  }
-
-  Future<void> _pickImage(Exercise exercise) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      setState(() {
-        exercise.imageUri = pickedFile.path;
-      });
-    }
-  }
-
-  void _removeImage(Exercise exercise) {
-    setState(() {
-      exercise.imageUri = null;
-    });
-  }
-
-  void _deleteBlock(int blockIndex) {
-    setState(() {
-      _session.blocks.removeAt(blockIndex);
-    });
-  }
-
-  void _deleteSet(Block block, Set setToDelete) {
-    setState(() {
-      block.sets.remove(setToDelete);
-    });
-  }
-
-  void _deleteItem(Set set, SetItem itemToDelete) {
-    setState(() {
-      set.items.remove(itemToDelete);
-    });
-  }
-
-  Future<void> _showSetRepeatDialog(Set set) async {
+  Future<void> _showSetRepeatDialog(
+    EditWorkoutNotifier notifier,
+    Set set,
+  ) async {
     final controller = TextEditingController(text: set.repeat.toString());
     final newCountStr = await showDialog<String>(
       context: context,
@@ -468,44 +154,33 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
     if (newCountStr != null) {
       final newCount = int.tryParse(newCountStr);
       if (newCount != null && newCount > 0) {
-        setState(() => set.repeat = newCount);
+        notifier.updateSetRepeat(set, newCount);
       }
     }
   }
 
-  void _addRest(Set set) {
-    setState(() {
-      set.items.add(Rest(id: _generateId(), durationSec: 60));
-    });
-  }
-
-  Future<void> _saveWorkout() async {
+  Future<void> _saveWorkout(EditWorkoutNotifier notifier) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
 
-    try {
-      await DatabaseHelper.instance.saveTrainingSession(_session);
+    final success = await notifier.saveWorkout();
+    if (success) {
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         const SnackBar(content: Text('Тренировка сохранена!')),
       );
       Navigator.of(context).pop();
-    } catch (e) {
+
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
     }
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_errorMessage != null) {
-      return Center(child: Text(_errorMessage!));
-    }
+  Widget _buildBody(EditWorkoutNotifier notifier) {
     return ReorderableListView.builder(
+      scrollController: _scrollController,
       buildDefaultDragHandles: false,
       proxyDecorator: (widget, index, animation) {
         return Material(
@@ -515,53 +190,46 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
         );
       },
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
-      itemCount: _session.blocks.length,
+      itemCount: notifier.session.blocks.length,
       itemBuilder: (context, index) {
-        final block = _session.blocks[index];
+        final block = notifier.session.blocks[index];
         return _BlockCard(
           key: ValueKey(block.id),
           index: index,
           block: block,
-          onAddSet: () => _addSet(block),
-          onEditLabel: () => _showEditBlockLabelDialog(block),
-          onDelete: () => _deleteBlock(index),
-          onDuplicate: () => _duplicateBlock(index),
-          onDuplicateSet: _duplicateSet,
-          onAddExercise: _addExercise,
-          onAddRest: _addRest,
-          onDeleteItem: _deleteItem,
-          onDeleteSet: _deleteSet,
-          onShowSetRepeatDialog: _showSetRepeatDialog,
-          onReorderSet: (set, oldIndex, newIndex) {
-            setState(() {
-              if (newIndex > oldIndex) newIndex -= 1;
-              final item = set.items.removeAt(oldIndex);
-              set.items.insert(newIndex, item);
-            });
-          },
-          onDuplicateItem: _duplicateItem,
-          onInsertItem: _insertItem,
-          onPickImage: _pickImage,
-          onRemoveImage: _removeImage,
-          generateId: _generateId,
+          onAddSet: () => notifier.addSet(block),
+          onEditLabel: () => _showEditBlockLabelDialog(notifier, block),
+          onDelete: () => notifier.deleteBlock(index),
+          onDuplicate: () => notifier.duplicateBlock(index),
+          onDuplicateSet: (block, set) => notifier.duplicateSet(block, set),
+          onAddExercise: (set) => notifier.addExercise(set),
+          onAddRest: (set) => notifier.addRest(set),
+          onDeleteItem: (set, item) => notifier.deleteItem(set, item),
+          onDeleteSet: (block, set) => notifier.deleteSet(block, set),
+          onShowSetRepeatDialog: (set) => _showSetRepeatDialog(notifier, set),
+          onReorderSet: (set, oldIndex, newIndex) =>
+              notifier.reorderSetItem(set, oldIndex, newIndex),
+          onDuplicateItem: (set, item) => notifier.duplicateItem(set, item),
+          onInsertItem: (set, index, item) =>
+              notifier.insertItem(set, index, item),
+          onPickImage: (exercise) => notifier.pickImage(exercise),
+          onRemoveImage: (exercise) => notifier.removeImage(exercise),
+          generateId: () =>
+              '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}',
         );
       },
-      onReorder: (oldIndex, newIndex) {
-        setState(() {
-          if (newIndex > oldIndex) {
-            newIndex -= 1;
-          }
-          final item = _session.blocks.removeAt(oldIndex);
-          _session.blocks.insert(newIndex, item);
-        });
-      },
+      onReorder: (oldIndex, newIndex) =>
+          notifier.reorderBlock(oldIndex, newIndex),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final notifier = context.watch<EditWorkoutNotifier>();
+    final voskState = notifier.voskState;
+    final isListening = voskState == VoskState.listening;
     return Scaffold(
-      backgroundColor: _isListening
+      backgroundColor: isListening
           ? Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3)
           : null,
       appBar: AppBar(
@@ -572,20 +240,20 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
         surfaceTintColor: Colors.transparent,
         title: Semantics(
           button: true,
-          label: 'Название тренировки: ${_session.name}',
+          label: 'Название тренировки: ${notifier.session.name}',
           onTapHint: 'Редактировать название',
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
               HapticFeedback.selectionClick();
-              _showEditTitleDialog();
+              _showEditTitleDialog(notifier);
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 vertical: 6.0,
                 horizontal: 8.0,
               ),
-              child: Text(_session.name),
+              child: Text(notifier.session.name),
             ),
           ),
         ),
@@ -593,38 +261,47 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen>
           IconButton(
             icon: const Icon(Icons.check_sharp),
             tooltip: 'Сохранить',
-            onPressed: _saveWorkout,
+            onPressed: () => _saveWorkout(notifier),
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: _buildBody(),
+      body: _buildBody(notifier),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           FloatingActionButton(
             heroTag: 'voiceInputFab',
-            onPressed: _isModelLoading ? null : _toggleListening,
+            onPressed:
+                (voskState == VoskState.ready ||
+                    voskState == VoskState.listening)
+                ? notifier.toggleListening
+                : null,
             tooltip: 'Голосовой ввод',
-            backgroundColor: _isListening
+            backgroundColor: isListening
                 ? Theme.of(context).colorScheme.tertiaryContainer
                 : null,
-            child: _isModelLoading
-                ? const CircularProgressIndicator(color: Colors.white)
-                : AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    transitionBuilder: (child, animation) =>
-                        ScaleTransition(scale: animation, child: child),
-                    child: Icon(
-                      _isListening ? Icons.mic_off : Icons.mic,
-                      key: ValueKey<bool>(_isListening),
-                    ),
-                  ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (child, animation) =>
+                  ScaleTransition(scale: animation, child: child),
+              child: switch (voskState) {
+                // VoskState.loading => const CircularProgressIndicator(
+                //   key: ValueKey('loading'),
+                //   color: Colors.white,
+                // ),
+                VoskState.listening => const Icon(
+                  Icons.mic_off,
+                  key: ValueKey('listening'),
+                ),
+                _ => const Icon(Icons.mic, key: ValueKey('ready')),
+              },
+            ),
           ),
           const SizedBox(height: 16),
           FloatingActionButton(
             heroTag: 'addBlockFab',
-            onPressed: _addBlock,
+            onPressed: notifier.addBlock,
             tooltip: 'Добавить блок',
             child: const Icon(Icons.add),
           ),

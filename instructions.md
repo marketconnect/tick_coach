@@ -26,7 +26,27 @@ mobile platforms.
 ## Project Structure
 * **Standard Structure:** Assumes a standard Flutter project structure with
   `lib/main.dart` as the primary application entry point.
+* **Layered Structure (Clean Architecture):** Organize code into explicit layers:
+  - `presentation/` — UI and state management (Widgets, Screens, ViewModel/BLoC/Notifier).
+  - `application/` — use cases (interactors) orchestrating domain rules.
+  - `domain/` — entities, value objects, repository interfaces (pure Dart).
+  - `data/` — repository implementations, data sources (remote/local), models/mappers.
+  - `infrastructure/` — platform services (logging, network, cache, analytics, native SDK wrappers).
+  - `di/` — dependency composition (registration and wiring of abstractions to implementations).
+  - `shared/` or `core/` — common utilities, Failure/Either types, constants, extensions.
 
+```text
+lib/
+  presentation/        # widgets, screens, state (BLoC/Notifier/ViewModel)
+  application/         # use_cases/
+  domain/              # entities/, value_objects/, repositories/
+  data/                # datasources/, models/, mappers/, repositories_impl/
+  infrastructure/      # http/, storage/, logging/, platform/, sdk_wrappers/
+  di/                  # injection.dart, providers.dart
+  shared/              # failure.dart, either.dart, utils/, extensions/
+  main.dart
+  app.dart
+```
 ## Flutter style guide
 * **SOLID Principles:** Apply SOLID principles throughout the codebase.
 * **Concise and Declarative:** Write concise, modern, technical Dart code.
@@ -39,6 +59,9 @@ mobile platforms.
   management solution for app state to handle the separation of concerns.
 * **Widgets are for UI:** Everything in Flutter's UI is a widget. Compose
   complex UIs from smaller, reusable widgets.
+  * **Layer Boundaries:** `presentation` must not depend on concrete repos/data
+  sources—only on `application` use cases or `domain` abstractions. Concrete
+  implementations live in `data/` and rely on services from `infrastructure/`.
 * **Navigation:** Use a modern routing package like `auto_route` or `go_router`.
   See the [navigation guide](./navigation.md) for a detailed example using
   `go_router`.
@@ -62,6 +85,20 @@ mobile platforms.
 ## Code Quality
 * **Code structure:** Adhere to maintainable code structure and separation of
   concerns (e.g., UI logic separate from business logic).
+  * **Dependency Direction (STRICT):**
+  - `presentation` → `application` → `domain`
+  - `data` → `domain`
+  - `infrastructure` → used by `data`, may depend on platform/packages
+  - `di` → wires everything, may depend on all layers
+  - `shared/core` → must not depend on presentation/data/infrastructure
+* **Import Rules (enforced via review & lints):**
+  - Forbidden: `presentation` imports `data` or `infrastructure`.
+  - Forbidden: `domain` imports anything outside `shared/core`.
+  - Allowed: `application` imports `domain` (+ `shared/core`).
+  - Allowed: `data` imports `domain`, `infrastructure`, platform packages.
+  - Allowed: `presentation` imports `application`, `shared/core`.
+* **Barrel Files:** Expose each layer via barrel files (`exports.dart` or
+  `index.dart`) and import them via package imports.
 * **Naming conventions:** Avoid abbreviations and use meaningful, consistent,
   descriptive names for variables, functions, and classes.
 * **Conciseness:** Write code that is as short as it can be while remaining
@@ -137,16 +174,18 @@ When building reusable APIs, such as a library, follow these principles.
   design. It should be clear, concise, and provide examples.
 
 ## Application Architecture
-* **Separation of Concerns:** Aim for separation of concerns similar to MVC/MVVM, with defined Model,
-  View, and ViewModel/Controller roles.
-* **Logical Layers:** Organize the project into logical layers:
-    * Presentation (widgets, screens)
-    * Domain (business logic classes)
-    * Data (model classes, API clients)
-    * Core (shared classes, utilities, and extension types)
-* **Feature-based Organization:** For larger projects, organize code by feature,
-  where each feature has its own presentation, domain, and data subfolders. This
-  improves navigability and scalability.
+* **Separation of Concerns:** Enforce Clean Architecture boundaries.
+* **Logical Layers (Expanded):**
+  - **Presentation:** UI and state only. Depends on `application`/`domain` via abstractions.
+  - **Application (Use Cases):** Scenario orchestration. Depends only on `domain`.
+  - **Domain:** Entities, value objects, policies. No Flutter/IO/HTTP.
+  - **Data:** Repository impls, DTO↔Entity mapping, DB/HTTP access.
+  - **Infrastructure:** Platform services (e.g., SDK/plugin wrappers), logging, cache.
+  - **DI:** Composition root wiring the graph.
+  - **Shared/Core:** Cross-cutting types/utilities without UI/platform deps.
+* **Feature-based Organization:** For larger apps, mirror features inside each
+  layer (e.g., `presentation/feature_x/`, `application/feature_x/use_cases/`,
+  `domain/feature_x/`, `data/feature_x/`).
 
 ## Lint Rules
 
@@ -166,6 +205,9 @@ linter:
 ### State Management
 * **Built-in Solutions:** Prefer Flutter's built-in state management solutions.
   Do not use a third-party package unless explicitly requested.
+  * **Layer Access Rule:** State objects in `presentation` invoke **only** use
+  cases from `application` (or domain abstractions), never concrete repos/data
+  sources.
 * **Streams:** Use `Streams` and `StreamBuilder` for handling a sequence of
   asynchronous events.
 * **Futures:** Use `Futures` and `FutureBuilder` for handling a single
@@ -206,6 +248,8 @@ linter:
   used in the application.
 * **Data Abstraction:** Abstract data sources (e.g., API calls, database
   operations) using Repositories/Services to promote testability.
+  * **Repository Contracts:** Define repository interfaces in `domain/`. Implement
+  them in `data/` and fulfill low-level concerns via `infrastructure/`.
 
 ### Routing
 * **GoRouter:** Use the `go_router` package for declarative navigation, deep
@@ -345,7 +389,12 @@ linter:
   code generation is common for state management (e.g., with `freezed`), try to
   avoid it for mocks.
 * **Coverage:** Aim for high test coverage.
-
+* **Layered Tests:** 
+  - **Domain:** pure unit tests for entities/value objects/policies.
+  - **Application:** unit tests for use cases with mocked `domain` repos.
+  - **Data:** tests with fake HTTP/DB and contract tests against `domain` repos.
+  - **Presentation:** widget tests; never hit real `data`/`infrastructure`.
+  
 ## Visual Design & Theming
 * **UI Design:** Build beautiful and intuitive user interfaces that follow
   modern design guidelines.

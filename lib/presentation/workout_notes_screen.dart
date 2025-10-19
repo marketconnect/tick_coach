@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
-import '../utils/database_helper.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
 
 class WorkoutNotesScreen extends StatefulWidget {
   final TrainingSession session;
@@ -31,10 +32,8 @@ class _WorkoutNotesScreenState extends State<WorkoutNotesScreen> {
     final notes = _notesController.text.trim();
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await DatabaseHelper.instance.updateTrainingSessionNotes(
-        widget.session.id,
-        notes,
-      );
+      final repo = Provider.of<WorkoutRepository>(context, listen: false);
+      await repo.updateTrainingSessionNotes(widget.session.id, notes);
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('Заметки сохранены')),
