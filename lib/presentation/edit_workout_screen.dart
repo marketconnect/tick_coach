@@ -421,6 +421,7 @@ class _BlockCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       shape: isContext
@@ -433,6 +434,9 @@ class _BlockCard extends StatelessWidget {
             )
           : null,
       child: ExpansionTile(
+        key: ValueKey('block_${block.id}'),
+        initiallyExpanded: notifier.expandedBlockId == block.id,
+        onExpansionChanged: (_) => notifier.toggleBlockExpansion(block.id),
         title: Row(
           children: [
             Expanded(
@@ -495,6 +499,7 @@ class _BlockCard extends StatelessWidget {
               final set = block.sets[index];
               return _SetCard(
                 key: ValueKey(set.id),
+                block: block,
                 index: index,
                 isContext: isSetContext(set),
                 set: set,
@@ -532,6 +537,7 @@ class _BlockCard extends StatelessWidget {
 }
 
 class _SetCard extends StatelessWidget {
+  final Block block;
   final Set set;
   final bool isContext;
   final int index;
@@ -550,6 +556,7 @@ class _SetCard extends StatelessWidget {
 
   const _SetCard({
     super.key,
+    required this.block,
     required this.set,
     required this.isContext,
     required this.index,
@@ -569,6 +576,7 @@ class _SetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Card(
@@ -584,6 +592,9 @@ class _SetCard extends StatelessWidget {
             : null,
         clipBehavior: Clip.antiAlias,
         child: ExpansionTile(
+          key: ValueKey('set_${set.id}'),
+          initiallyExpanded: notifier.expandedSetId == set.id,
+          onExpansionChanged: (_) => notifier.toggleSetExpansion(set.id, block),
           leading: ReorderableDragStartListener(
             index: index,
             child: const Icon(Icons.drag_handle),
@@ -635,29 +646,38 @@ class _SetCard extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: set.items.length,
                 itemBuilder: (context, index) {
+                  final notifier = context.read<EditWorkoutNotifier>();
                   final item = set.items[index];
                   if (item is Exercise) {
-                    return _ExerciseItemCard(
+                    return Listener(
                       key: ValueKey(item.id),
-                      exercise: item,
-                      index: index,
-                      onDelete: () => onDeleteItem(item),
-                      onDuplicate: () => onDuplicateItem(item),
-                      onInsert: (idx, item) => onInsertItem(idx, item),
-                      onPickImage: () => onPickImage(item),
-                      onRemoveImage: () => onRemoveImage(item),
-                      generateId: generateId,
+                      onPointerDown: (_) => notifier.setContext(item),
+                      child: _ExerciseItemCard(
+                        isContext: notifier.context == item,
+                        exercise: item,
+                        index: index,
+                        onDelete: () => onDeleteItem(item),
+                        onDuplicate: () => onDuplicateItem(item),
+                        onInsert: (idx, item) => onInsertItem(idx, item),
+                        onPickImage: () => onPickImage(item),
+                        onRemoveImage: () => onRemoveImage(item),
+                        generateId: generateId,
+                      ),
                     );
                   }
                   if (item is Rest) {
-                    return _RestItemCard(
+                    return Listener(
                       key: ValueKey(item.id),
-                      rest: item,
-                      index: index,
-                      onDelete: () => onDeleteItem(item),
-                      onDuplicate: () => onDuplicateItem(item),
-                      onInsert: (idx, item) => onInsertItem(idx, item),
-                      generateId: generateId,
+                      onPointerDown: (_) => notifier.setContext(item),
+                      child: _RestItemCard(
+                        isContext: notifier.context == item,
+                        rest: item,
+                        index: index,
+                        onDelete: () => onDeleteItem(item),
+                        onDuplicate: () => onDuplicateItem(item),
+                        onInsert: (idx, item) => onInsertItem(idx, item),
+                        generateId: generateId,
+                      ),
                     );
                   }
                   return SizedBox.shrink(key: ValueKey(item.id));
@@ -693,6 +713,7 @@ class _SetCard extends StatelessWidget {
 
 class _ExerciseItemCard extends StatefulWidget {
   final Exercise exercise;
+  final bool isContext;
   final int index;
   final VoidCallback onDelete;
   final VoidCallback onDuplicate;
@@ -702,7 +723,7 @@ class _ExerciseItemCard extends StatefulWidget {
   final String Function() generateId;
 
   const _ExerciseItemCard({
-    super.key,
+    required this.isContext,
     required this.exercise,
     required this.index,
     required this.onDelete,
@@ -788,6 +809,15 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: widget.isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.tertiary,
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -1028,6 +1058,7 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
 
 class _RestItemCard extends StatefulWidget {
   final Rest rest;
+  final bool isContext;
   final int index;
   final VoidCallback onDelete;
   final VoidCallback onDuplicate;
@@ -1035,7 +1066,7 @@ class _RestItemCard extends StatefulWidget {
   final String Function() generateId;
 
   const _RestItemCard({
-    super.key,
+    required this.isContext,
     required this.rest,
     required this.index,
     required this.onDelete,
@@ -1089,6 +1120,15 @@ class _RestItemCardState extends State<_RestItemCard> {
     final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: widget.isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.tertiary,
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       color: theme.colorScheme.surfaceContainerLow,
       child: Row(
         children: [

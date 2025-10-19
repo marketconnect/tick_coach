@@ -39,6 +39,12 @@ class EditWorkoutNotifier extends ChangeNotifier {
   Object? _context;
   Object? get context => _context;
 
+  String? _expandedBlockId;
+  String? get expandedBlockId => _expandedBlockId;
+
+  String? _expandedSetId;
+  String? get expandedSetId => _expandedSetId;
+
   StreamSubscription<String>? _resultSubscription;
 
   final StreamController<void> _closeVoiceChatController =
@@ -104,6 +110,40 @@ class EditWorkoutNotifier extends ChangeNotifier {
     _closeVoiceChatController.close();
     _voskService.state.removeListener(_onVoskStateChanged);
     super.dispose();
+  }
+
+  void setContext(Object? newContext) {
+    if (_context != newContext) {
+      _context = newContext;
+      notifyListeners();
+    }
+  }
+
+  void toggleBlockExpansion(String blockId) {
+    if (_expandedBlockId == blockId) {
+      _expandedBlockId = null;
+      if (_context is Block && (_context as Block).id == blockId) {
+        _context = _session;
+      }
+    } else {
+      _expandedBlockId = blockId;
+      _context = _session.blocks.firstWhere((b) => b.id == blockId);
+    }
+    _expandedSetId = null; // Collapse sets when a block is toggled
+    notifyListeners();
+  }
+
+  void toggleSetExpansion(String setId, Block block) {
+    if (_expandedSetId == setId) {
+      _expandedSetId = null;
+      if (_context is Set && (_context as Set).id == setId) {
+        _context = block;
+      }
+    } else {
+      _expandedSetId = setId;
+      _context = block.sets.firstWhere((s) => s.id == setId);
+    }
+    notifyListeners();
   }
 
   void updateSessionName(String name) {
@@ -332,6 +372,8 @@ class EditWorkoutNotifier extends ChangeNotifier {
     );
     _session.blocks.add(newBlock);
     _context = newBlock;
+    _expandedBlockId = newBlock.id;
+    _expandedSetId = null;
     notifyListeners();
   }
 
@@ -340,18 +382,24 @@ class EditWorkoutNotifier extends ChangeNotifier {
     final newSet = Set(id: _generateId(), items: [], label: label);
     block.sets.add(newSet);
     _context = newSet;
+    _expandedBlockId = block.id;
+    _expandedSetId = newSet.id;
     notifyListeners();
   }
 
   void addExercise(Set set, [String name = 'Новое упражнение']) {
     _saveStateForUndo();
-    set.items.add(Exercise(id: _generateId(), name: name));
+    final newExercise = Exercise(id: _generateId(), name: name);
+    set.items.add(newExercise);
+    _context = newExercise;
     notifyListeners();
   }
 
   void addRest(Set set, [int duration = 60]) {
     _saveStateForUndo();
-    set.items.add(Rest(id: _generateId(), durationSec: duration));
+    final newRest = Rest(id: _generateId(), durationSec: duration);
+    set.items.add(newRest);
+    _context = newRest;
     notifyListeners();
   }
 
