@@ -77,12 +77,17 @@ class VoskService {
       state.value = VoskState.ready;
       _initCompleter!.complete();
     } catch (e) {
-      state.value = VoskState.error;
-      // 4. Обработка ошибок инициализации
-      final exception = Exception(
-        'Failed to initialize VoskService: ${e.toString()}',
-      );
-      _initCompleter!.completeError(exception, StackTrace.current);
+      if (e is PlatformException &&
+          e.message!.contains('SpeechService instance already exist')) {
+        debugPrint(
+          'VoskService: Instance already exists (hot restart). Setting state to error.',
+        );
+        state.value = VoskState.ready;
+        _initCompleter!.complete();
+      } else {
+        state.value = VoskState.error;
+        _initCompleter!.completeError(e, StackTrace.current);
+      }
     }
   }
 

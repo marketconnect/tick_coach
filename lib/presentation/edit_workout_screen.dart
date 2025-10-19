@@ -36,16 +36,26 @@ class _EditWorkoutScreenView extends StatefulWidget {
 
 class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
   final _scrollController = ScrollController();
+  StreamSubscription? _closeChatSubscription;
 
   @override
   void initState() {
     super.initState();
+    // Defer access to context
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifier = context.read<EditWorkoutNotifier>();
+      _closeChatSubscription = notifier.closeVoiceChatStream.listen((_) {
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.of(context).pop();
+        }
+      });
+    });
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
-
+    _closeChatSubscription?.cancel();
     super.dispose();
   }
 
@@ -159,22 +169,64 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
     }
   }
 
+  Future<void> _showVoiceChatBottomSheet(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.4,
+        maxChildSize: 1.0,
+        builder: (BuildContext context, ScrollController scrollController) {
+          return _VoiceChatView(
+            notifier: notifier,
+            scrollController: scrollController,
+          );
+        },
+      ),
+    );
+  }
+
+  void _handleVoiceFabTap(
+    BuildContext context,
+    EditWorkoutNotifier notifier,
+    bool isListening,
+  ) {
+    if (isListening) {
+      notifier.toggleListening();
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    } else {
+      notifier.clearConversationLog();
+      notifier.toggleListening();
+      _showVoiceChatBottomSheet(context).whenComplete(() {
+        if (context.read<EditWorkoutNotifier>().voskState ==
+            VoskState.listening) {
+          context.read<EditWorkoutNotifier>().toggleListening();
+        }
+      });
+    }
+  }
+
   Future<void> _saveWorkout(EditWorkoutNotifier notifier) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
 
     final success = await notifier.saveWorkout();
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
     if (success) {
-      if (!mounted) return;
-      messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         const SnackBar(content: Text('Тренировка сохранена!')),
       );
       Navigator.of(context).pop();
-
-      if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Ошибка сохранения')),
+      );
     }
   }
 
@@ -196,6 +248,7 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
         return _BlockCard(
           key: ValueKey(block.id),
           index: index,
+          isContext: notifier.context == block,
           block: block,
           onAddSet: () => notifier.addSet(block),
           onEditLabel: () => _showEditBlockLabelDialog(notifier, block),
@@ -206,9 +259,12 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
           onAddRest: (set) => notifier.addRest(set),
           onDeleteItem: (set, item) => notifier.deleteItem(set, item),
           onDeleteSet: (block, set) => notifier.deleteSet(block, set),
+          isSetContext: (set) => notifier.context == set,
           onShowSetRepeatDialog: (set) => _showSetRepeatDialog(notifier, set),
           onReorderSet: (set, oldIndex, newIndex) =>
               notifier.reorderSetItem(set, oldIndex, newIndex),
+          onReorderSetsInBlock: (block, oldIndex, newIndex) =>
+              notifier.reorderSetsInBlock(block, oldIndex, newIndex),
           onDuplicateItem: (set, item) => notifier.duplicateItem(set, item),
           onInsertItem: (set, index, item) =>
               notifier.insertItem(set, index, item),
@@ -267,45 +323,46 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
         ],
       ),
       body: _buildBody(notifier),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FloatingActionButton(
-            heroTag: 'voiceInputFab',
-            onPressed:
-                (voskState == VoskState.ready ||
-                    voskState == VoskState.listening)
-                ? notifier.toggleListening
-                : null,
-            tooltip: 'Голосовой ввод',
-            backgroundColor: isListening
-                ? Theme.of(context).colorScheme.tertiaryContainer
-                : null,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (child, animation) =>
-                  ScaleTransition(scale: animation, child: child),
-              child: switch (voskState) {
-                // VoskState.loading => const CircularProgressIndicator(
-                //   key: ValueKey('loading'),
-                //   color: Colors.white,
-                // ),
-                VoskState.listening => const Icon(
-                  Icons.mic_off,
-                  key: ValueKey('listening'),
+      floatingActionButton: Consumer<EditWorkoutNotifier>(
+        builder: (context, notifier, child) {
+          final voskState = notifier.voskState;
+          final isListening = voskState == VoskState.listening;
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'voiceInputFab',
+                onPressed:
+                    (voskState == VoskState.ready ||
+                        voskState == VoskState.listening)
+                    ? () => _handleVoiceFabTap(context, notifier, isListening)
+                    : null,
+                tooltip: 'Голосовой ввод',
+                backgroundColor: isListening
+                    ? Theme.of(context).colorScheme.tertiaryContainer
+                    : null,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (child, animation) =>
+                      ScaleTransition(scale: animation, child: child),
+                  child: isListening
+                      ? const Icon(Icons.mic_off, key: ValueKey('listening'))
+                      : const Icon(Icons.mic, key: ValueKey('ready')),
                 ),
-                _ => const Icon(Icons.mic, key: ValueKey('ready')),
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            heroTag: 'addBlockFab',
-            onPressed: notifier.addBlock,
-            tooltip: 'Добавить блок',
-            child: const Icon(Icons.add),
-          ),
-        ],
+              ),
+              const SizedBox(height: 16),
+              child!,
+            ],
+          );
+        },
+        child: FloatingActionButton(
+          heroTag: 'addBlockFab',
+          onPressed: () => context.read<EditWorkoutNotifier>().addBlock(),
+          tooltip: 'Добавить блок',
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }
@@ -313,6 +370,7 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
 
 class _BlockCard extends StatelessWidget {
   final Block block;
+  final bool isContext;
   final int index;
   final VoidCallback onAddSet;
   final VoidCallback onEditLabel;
@@ -322,7 +380,9 @@ class _BlockCard extends StatelessWidget {
   final void Function(Set) onAddRest;
   final void Function(Set, SetItem) onDeleteItem;
   final void Function(Block, Set) onDeleteSet;
+  final bool Function(Set) isSetContext;
   final void Function(Set, int, int) onReorderSet;
+  final void Function(Block, int, int) onReorderSetsInBlock;
   final void Function(Set) onShowSetRepeatDialog;
   final void Function(Set, SetItem) onDuplicateItem;
   final void Function(Set, int, SetItem) onInsertItem;
@@ -334,6 +394,7 @@ class _BlockCard extends StatelessWidget {
   const _BlockCard({
     super.key,
     required this.block,
+    required this.isContext,
     required this.index,
     required this.onAddSet,
     required this.onEditLabel,
@@ -345,18 +406,29 @@ class _BlockCard extends StatelessWidget {
     required this.onAddRest,
     required this.onDeleteItem,
     required this.onReorderSet,
+    required this.onReorderSetsInBlock,
     required this.onShowSetRepeatDialog,
     required this.onDuplicateItem,
     required this.onInsertItem,
     required this.onPickImage,
     required this.onRemoveImage,
     required this.generateId,
+    required this.isSetContext,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       child: ExpansionTile(
         title: Row(
           children: [
@@ -404,24 +476,43 @@ class _BlockCard extends StatelessWidget {
           ],
         ),
         children: [
-          for (final set in block.sets)
-            _SetCard(
-              key: ValueKey(set.id),
-              set: set,
-              onAddExercise: () => onAddExercise(set),
-              onAddRest: () => onAddRest(set),
-              onDelete: () => onDeleteSet(block, set),
-              onDuplicate: () => onDuplicateSet(block, set),
-              onDeleteItem: (item) => onDeleteItem(set, item),
-              onReorder: (oldIndex, newIndex) =>
-                  onReorderSet(set, oldIndex, newIndex),
-              onShowSetRepeatDialog: () => onShowSetRepeatDialog(set),
-              onDuplicateItem: (item) => onDuplicateItem(set, item),
-              onInsertItem: (index, item) => onInsertItem(set, index, item),
-              onPickImage: onPickImage,
-              onRemoveImage: onRemoveImage,
-              generateId: generateId,
-            ),
+          ReorderableListView.builder(
+            buildDefaultDragHandles: false,
+            proxyDecorator: (widget, index, animation) {
+              return Material(
+                elevation: 4.0,
+                color: Colors.transparent,
+                child: widget,
+              );
+            },
+            itemCount: block.sets.length,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, index) {
+              final set = block.sets[index];
+              return _SetCard(
+                key: ValueKey(set.id),
+                index: index,
+                isContext: isSetContext(set),
+                set: set,
+                onAddExercise: () => onAddExercise(set),
+                onAddRest: () => onAddRest(set),
+                onDelete: () => onDeleteSet(block, set),
+                onDuplicate: () => onDuplicateSet(block, set),
+                onDeleteItem: (item) => onDeleteItem(set, item),
+                onReorder: (oldIndex, newIndex) =>
+                    onReorderSet(set, oldIndex, newIndex),
+                onShowSetRepeatDialog: () => onShowSetRepeatDialog(set),
+                onDuplicateItem: (item) => onDuplicateItem(set, item),
+                onInsertItem: (idx, item) => onInsertItem(set, idx, item),
+                onPickImage: onPickImage,
+                onRemoveImage: onRemoveImage,
+                generateId: generateId,
+              );
+            },
+            onReorder: (old, newIdx) =>
+                onReorderSetsInBlock(block, old, newIdx),
+          ),
           const SizedBox(height: 8),
           Center(
             child: ElevatedButton.icon(
@@ -439,6 +530,8 @@ class _BlockCard extends StatelessWidget {
 
 class _SetCard extends StatelessWidget {
   final Set set;
+  final bool isContext;
+  final int index;
   final VoidCallback onAddExercise;
   final VoidCallback onAddRest;
   final VoidCallback onDelete;
@@ -455,6 +548,8 @@ class _SetCard extends StatelessWidget {
   const _SetCard({
     super.key,
     required this.set,
+    required this.isContext,
+    required this.index,
     required this.onAddExercise,
     required this.onAddRest,
     required this.onDelete,
@@ -472,77 +567,122 @@ class _SetCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        children: [
-          ListTile(
-            title: Text(set.label ?? 'Сет'),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextButton(
-                  onPressed: onShowSetRepeatDialog,
-                  child: Text('x ${set.repeat}'),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Card(
+        margin: EdgeInsets.zero,
+        shape: isContext
+            ? RoundedRectangleBorder(
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.secondary,
+                  width: 1.5,
                 ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'delete') onDelete();
-                    if (value == 'duplicate') onDuplicate();
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'duplicate',
-                      child: Text('Копировать сет'),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text(
-                        'Удалить сет',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                borderRadius: BorderRadius.circular(12),
+              )
+            : null,
+        clipBehavior: Clip.antiAlias,
+        child: ExpansionTile(
+          leading: ReorderableDragStartListener(
+            index: index,
+            child: const Icon(Icons.drag_handle),
+          ),
+          title: Text(set.label ?? 'Сет'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: onShowSetRepeatDialog,
+                child: Text('x ${set.repeat}'),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'delete') onDelete();
+                  if (value == 'duplicate') onDuplicate();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'duplicate',
+                    child: Text('Копировать сет'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Удалить сет',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: ReorderableListView.builder(
+                buildDefaultDragHandles: false,
+                proxyDecorator: (widget, index, animation) {
+                  return Material(
+                    elevation: 4.0,
+                    color: Colors.transparent,
+                    child: widget,
+                  );
+                },
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: set.items.length,
+                itemBuilder: (context, index) {
+                  final item = set.items[index];
+                  if (item is Exercise) {
+                    return _ExerciseItemCard(
+                      key: ValueKey(item.id),
+                      exercise: item,
+                      index: index,
+                      onDelete: () => onDeleteItem(item),
+                      onDuplicate: () => onDuplicateItem(item),
+                      onInsert: (idx, item) => onInsertItem(idx, item),
+                      onPickImage: () => onPickImage(item),
+                      onRemoveImage: () => onRemoveImage(item),
+                      generateId: generateId,
+                    );
+                  }
+                  if (item is Rest) {
+                    return _RestItemCard(
+                      key: ValueKey(item.id),
+                      rest: item,
+                      index: index,
+                      onDelete: () => onDeleteItem(item),
+                      onDuplicate: () => onDuplicateItem(item),
+                      onInsert: (idx, item) => onInsertItem(idx, item),
+                      generateId: generateId,
+                    );
+                  }
+                  return SizedBox.shrink(key: ValueKey(item.id));
+                },
+                onReorder: onReorder,
+              ),
             ),
-          ),
-          ReorderableListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: set.items.length,
-            itemBuilder: (context, index) {
-              final item = set.items[index];
-              if (item is Exercise) {
-                return _ExerciseItemCard(
-                  key: ValueKey(item.id),
-                  exercise: item,
-                  index: index,
-                  onDelete: () => onDeleteItem(item),
-                  onDuplicate: () => onDuplicateItem(item),
-                  onInsert: (idx, item) => onInsertItem(idx, item),
-                  onPickImage: () => onPickImage(item),
-                  onRemoveImage: () => onRemoveImage(item),
-                  generateId: generateId,
-                );
-              }
-              if (item is Rest) {
-                return _RestItemCard(
-                  key: ValueKey(item.id),
-                  rest: item,
-                  index: index,
-                  onDelete: () => onDeleteItem(item),
-                  onDuplicate: () => onDuplicateItem(item),
-                  onInsert: (idx, item) => onInsertItem(idx, item),
-                  generateId: generateId,
-                );
-              }
-              return SizedBox.shrink(key: ValueKey(item.id));
-            },
-            onReorder: onReorder,
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, right: 8.0, bottom: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: onAddExercise,
+                    icon: const Icon(Icons.fitness_center),
+                    label: const Text('Упражнение'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: onAddRest,
+                    icon: const Icon(Icons.pause),
+                    label: const Text('Отдых'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -621,10 +761,13 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
   void _changeValue(int delta) {
     setState(() {
       if (widget.exercise.isRepsBased) {
-        widget.exercise.reps = (widget.exercise.reps + delta).clamp(0, 1000);
+        final newValue = (widget.exercise.reps + delta).clamp(0, 1000);
+        widget.exercise.reps = newValue;
+        _valueController.text = newValue.toString();
       } else {
-        widget.exercise.durationSec = (widget.exercise.durationSec + delta)
-            .clamp(0, 86400);
+        final newValue = (widget.exercise.durationSec + delta).clamp(0, 86400);
+        widget.exercise.durationSec = newValue;
+        _valueController.text = newValue.toString();
       }
     });
   }
@@ -651,59 +794,73 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
               ReorderableDragStartListener(
                 index: widget.index,
                 child: const Padding(
-                  padding: EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0),
+                  padding: EdgeInsets.fromLTRB(12.0, 16.0, 12.0, 12.0),
                   child: Icon(Icons.drag_handle),
                 ),
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.remove),
-                        onPressed: () => _changeValue(-1),
-                      ),
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            minWidth: 72,
-                            maxWidth: 140,
-                          ),
-                          child: TextField(
-                            controller: _valueController,
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            decoration: InputDecoration(
-                              isDense: true,
-                              border: InputBorder.none,
-                              suffixText: unitLabel,
-                              suffixStyle: theme.textTheme.bodyLarge,
-                            ),
-                            style: theme.textTheme.bodyLarge,
-                            onChanged: (txt) {
-                              final v = int.tryParse(txt) ?? 0;
-                              setState(() {
-                                if (widget.exercise.isRepsBased) {
-                                  widget.exercise.reps = v.clamp(0, 1000);
-                                } else {
-                                  widget.exercise.durationSec = v.clamp(
-                                    0,
-                                    86400,
-                                  );
-                                }
-                              });
-                            },
-                          ),
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Упражнение/описание',
+                          border: InputBorder.none,
+                          isDense: true,
                         ),
+                        onChanged: (value) => widget.exercise.name = value,
+                        textCapitalization: TextCapitalization.sentences,
+                        style: theme.textTheme.titleMedium,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: () => _changeValue(1),
+                      Row(
+                        children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.remove),
+                            onPressed: () => _changeValue(-1),
+                          ),
+                          Flexible(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 60),
+                              child: TextField(
+                                controller: _valueController,
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                  suffixText: unitLabel,
+                                  suffixStyle: theme.textTheme.bodyLarge,
+                                ),
+                                style: theme.textTheme.bodyLarge,
+                                onChanged: (txt) {
+                                  final v = int.tryParse(txt) ?? 0;
+                                  setState(() {
+                                    if (widget.exercise.isRepsBased) {
+                                      widget.exercise.reps = v.clamp(0, 1000);
+                                    } else {
+                                      widget.exercise.durationSec = v.clamp(
+                                        0,
+                                        86400,
+                                      );
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.add),
+                            onPressed: () => _changeValue(1),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -815,17 +972,6 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Упражнение/описание',
-              ),
-              onChanged: (value) => widget.exercise.name = value,
-              textCapitalization: TextCapitalization.sentences,
-            ),
-          ),
-          Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Row(
               children: [
@@ -929,10 +1075,9 @@ class _RestItemCardState extends State<_RestItemCard> {
 
   void _changeDuration(int delta) {
     setState(() {
-      widget.rest.durationSec = (widget.rest.durationSec + delta).clamp(
-        0,
-        86400,
-      );
+      final newDuration = (widget.rest.durationSec + delta).clamp(0, 86400);
+      widget.rest.durationSec = newDuration;
+      _durationController.text = newDuration.toString();
     });
   }
 
@@ -947,7 +1092,7 @@ class _RestItemCardState extends State<_RestItemCard> {
           ReorderableDragStartListener(
             index: widget.index,
             child: const Padding(
-              padding: EdgeInsets.all(16.0),
+              padding: EdgeInsets.fromLTRB(12.0, 16.0, 12.0, 16.0),
               child: Icon(Icons.drag_handle),
             ),
           ),
@@ -972,12 +1117,13 @@ class _RestItemCardState extends State<_RestItemCard> {
                 Row(
                   children: [
                     IconButton(
+                      visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.remove),
                       onPressed: () => _changeDuration(-5),
                     ),
                     Flexible(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 80),
+                        constraints: const BoxConstraints(maxWidth: 60),
                         child: TextField(
                           controller: _durationController,
                           textAlign: TextAlign.center,
@@ -1000,6 +1146,7 @@ class _RestItemCardState extends State<_RestItemCard> {
                       ),
                     ),
                     IconButton(
+                      visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.add),
                       onPressed: () => _changeDuration(5),
                     ),
@@ -1084,5 +1231,90 @@ class _RestItemCardState extends State<_RestItemCard> {
 extension StringExtension on String {
   String capitalize() {
     return "${this[0].toUpperCase()}${substring(1)}";
+  }
+}
+
+class _VoiceChatView extends StatelessWidget {
+  final EditWorkoutNotifier notifier;
+  final ScrollController scrollController;
+
+  const _VoiceChatView({
+    required this.notifier,
+    required this.scrollController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const SizedBox(width: 48),
+                Text('Голосовой помощник', style: theme.textTheme.titleMedium),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Consumer<EditWorkoutNotifier>(
+              builder: (context, notifier, child) {
+                final listScrollController = ScrollController();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (listScrollController.hasClients) {
+                    listScrollController.animateTo(
+                      listScrollController.position.maxScrollExtent,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                });
+                return ListView.builder(
+                  controller: listScrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: notifier.conversationLog.length,
+                  itemBuilder: (context, index) {
+                    final message = notifier.conversationLog[index];
+                    final isUserMessage = message.startsWith('You:');
+                    final alignment = isUserMessage
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft;
+                    final color = isUserMessage
+                        ? theme.colorScheme.primaryContainer
+                        : theme.colorScheme.surfaceContainerHighest;
+                    return Align(
+                      alignment: alignment,
+                      child: Card(
+                        color: color,
+                        elevation: 1,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Text(message),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'dart:math';
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +13,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   final WorkoutRepository _workoutRepository;
   final VoskService _voskService;
   late TrainingSession _session;
+  TrainingSession? _previousSession;
 
   EditWorkoutNotifier(
     this._workoutRepository,
@@ -19,26 +21,39 @@ class EditWorkoutNotifier extends ChangeNotifier {
     TrainingSession initialSession,
   ) {
     _session = initialSession;
-    _initializeVoskService();
+    _connectToVoskService();
+    _context = _session;
   }
 
   TrainingSession get session => _session;
   VoskState get voskState => _voskService.state.value;
 
+  // --- Chatbot State ---
+
+  List<String> _conversationLog = [];
+  List<String> get conversationLog => _conversationLog;
+
+  Object? _context;
+  Object? get context => _context;
+
   StreamSubscription<String>? _resultSubscription;
 
-  Future<void> _initializeVoskService() async {
-    try {
-      _voskService.state.addListener(_onVoskStateChanged);
-      await _voskService.initialize(
-        'assets/models/vosk-model-small-ru-0.22.zip',
-      );
-      _resultSubscription = _voskService.recognitionResultStream.listen(
-        _handleVoiceCommand,
-      );
-    } catch (e) {
-      debugPrint('Ошибка инициализации голосового ввода: ${e.toString()}');
-    }
+  final StreamController<void> _closeVoiceChatController =
+      StreamController.broadcast();
+  Stream<void> get closeVoiceChatStream => _closeVoiceChatController.stream;
+
+  void _addBotMessage(String text) {
+    _conversationLog.add("Bot: $text");
+    notifyListeners();
+  }
+
+  void _connectToVoskService() {
+    _voskService.state.addListener(_onVoskStateChanged);
+    _resultSubscription = _voskService.recognitionResultStream.listen(
+      _handleVoiceCommand,
+    );
+    // Сразу проверяем состояние, если сервис уже был инициализирован
+    _onVoskStateChanged();
   }
 
   void _onVoskStateChanged() {
@@ -48,18 +63,57 @@ class EditWorkoutNotifier extends ChangeNotifier {
   String _generateId() =>
       '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
 
+  void _saveStateForUndo() {
+    // Deep copy for undo
+    _previousSession = _session.copyWith(
+      blocks: _session.blocks
+          .map(
+            (block) => block.copyWith(
+              sets: block.sets
+                  .map(
+                    (set) => set.copyWith(
+                      items: set.items.map((item) => item.copyWith()).toList(),
+                    ),
+                  )
+                  .toList(),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  void undo() {
+    if (_previousSession != null) {
+      _session = _previousSession!;
+      _previousSession = null;
+      // Reset context to the session level after undo
+      _context = _session;
+      _addBotMessage("Отменила последнее действие.");
+      notifyListeners();
+    } else {
+      _addBotMessage("Нечего отменять.");
+    }
+  }
+
   @override
   void dispose() {
     _resultSubscription?.cancel();
+    _closeVoiceChatController.close();
     _voskService.state.removeListener(_onVoskStateChanged);
     super.dispose();
   }
 
   void updateSessionName(String name) {
     if (name.isNotEmpty) {
+      _saveStateForUndo();
       _session.name = name;
       notifyListeners();
     }
+  }
+
+  void clearConversationLog() {
+    _conversationLog.clear();
+    notifyListeners();
   }
 
   Future<void> toggleListening() async {
@@ -68,114 +122,178 @@ class EditWorkoutNotifier extends ChangeNotifier {
       await _voskService.stopListening();
     } else if (currentState == VoskState.ready) {
       await _voskService.startListening();
+      // New logic for contextual prompt
+      if (_session.blocks.isEmpty || _context is TrainingSession) {
+        _addBotMessage(
+          'Перечислите количество и названия блоков, которые хотите добавить? Пример: "три:Разминка,Основной блок,Заминка"',
+        );
+      } else if (_context is Block) {
+        _addBotMessage('Сколько сетов хотите добавить? Пример: "пять".');
+      } else if (_context is Set) {
+        _addBotMessage(
+          'Назовите упражнение, которое хотите добавить? Пример: "отжимания 25 раз." или "бег на месте 30 секунд"',
+        );
+      }
     }
   }
 
   void _handleVoiceCommand(String command) {
+    debugPrint('VOICE COMMAND RECEIVED: "$command"');
     if (command.isEmpty) return;
-    command = command.toLowerCase();
-    command = command
-        .replaceAll('повторений', 'раз')
-        .replaceAll('повторов', 'раз')
-        .replaceAll('килограмм', 'кг');
 
-    if (command.contains('блок')) {
-      String type = 'Основная часть';
-      if (command.contains('разминка')) type = 'Разминка';
-      if (command.contains('заминка')) type = 'Заминка';
-      _session.blocks.add(Block(id: _generateId(), type: type, sets: []));
-      notifyListeners();
-      return;
+    _conversationLog.add("You: $command");
+    notifyListeners();
+
+    final normalizedCommand = command.toLowerCase();
+
+    if (normalizedCommand == 'отмена' || normalizedCommand == 'отменить') {
+      undo();
+    } else if (_session.blocks.isEmpty || _context is TrainingSession) {
+      _handleAddBlocks(normalizedCommand);
+    } else if (_context is Block) {
+      _handleAddSets(normalizedCommand);
+    } else if (_context is Set) {
+      _handleAddExercise(normalizedCommand);
+    } else {
+      _addBotMessage("Я вас не поняла, повторите, пожалуйста.");
     }
-
-    if (command.contains('сет')) {
-      var lastBlock = _session.blocks.lastOrNull;
-      if (lastBlock == null) {
-        lastBlock = Block(id: _generateId(), type: 'Основная часть', sets: []);
-        _session.blocks.add(lastBlock);
-      }
-      int repeat = 1;
-      final repeatMatch = RegExp(
-        r'(\d+)\s+(?:раз|круга|круг)',
-      ).firstMatch(command);
-      if (repeatMatch != null) {
-        repeat = int.tryParse(repeatMatch.group(1)!) ?? 1;
-      }
-      String? label;
-      if (command.contains('суперсет')) label = 'Суперсет';
-      if (command.contains('трисет')) label = 'Трисет';
-      lastBlock.sets.add(
-        Set(id: _generateId(), items: [], repeat: repeat, label: label),
-      );
-      notifyListeners();
-      return;
-    }
-
-    if (command.startsWith('отдых')) {
-      final durationMatch = RegExp(r'(\d+)\s+секунд').firstMatch(command);
-      int duration = 60;
-      if (durationMatch != null) {
-        duration = int.tryParse(durationMatch.group(1)!) ?? 60;
-      }
-      _addItemToLastSet(Rest(id: _generateId(), durationSec: duration));
-      return;
-    }
-
-    var processedCommand = command
-        .replaceFirst('добавь', '')
-        .replaceFirst('новое упражнение', '')
-        .trim();
-    if (processedCommand == 'упражнение') {
-      _addItemToLastSet(Exercise(id: _generateId(), name: 'Новое упражнение'));
-      return;
-    }
-
-    int? reps;
-    final repsMatch = RegExp(r'(\d+)\s+раз').firstMatch(processedCommand);
-    if (repsMatch != null) {
-      reps = int.tryParse(repsMatch.group(1)!);
-      processedCommand = processedCommand
-          .replaceAll(repsMatch.group(0)!, '')
-          .trim();
-    }
-
-    double? loadKg;
-    final loadMatch = RegExp(
-      r'(\d+(?:\.|\,)?\d*)\s+кг',
-    ).firstMatch(processedCommand);
-    if (loadMatch != null) {
-      loadKg = double.tryParse(loadMatch.group(1)!.replaceAll(',', '.'));
-      processedCommand = processedCommand
-          .replaceAll(loadMatch.group(0)!, '')
-          .trim();
-    }
-
-    final name = processedCommand.isNotEmpty
-        ? processedCommand
-        : 'Новое упражнение';
-    _addItemToLastSet(
-      Exercise(
-        id: _generateId(),
-        name: name.capitalize(),
-        reps: reps ?? 10,
-        loadKg: loadKg,
-      ),
-    );
   }
 
-  void _addItemToLastSet(SetItem item) {
-    var lastSet = _session.blocks.lastOrNull?.sets.lastOrNull;
-    if (lastSet == null) {
-      var lastBlock = _session.blocks.lastOrNull;
-      if (lastBlock == null) {
-        lastBlock = Block(id: _generateId(), type: 'Основная часть', sets: []);
-        _session.blocks.add(lastBlock);
+  void _handleAddBlocks(String command) {
+    final match = RegExp(r'(\S+):(.+)').firstMatch(command);
+    if (match != null) {
+      final countWord = match.group(1)!;
+      final namesStr = match.group(2)!;
+      final count = _parseNumberWord(countWord);
+      final names =
+          namesStr.split(',').map((e) => e.trim().capitalize()).toList();
+
+      if (count > 0 && names.isNotEmpty && count == names.length) {
+        _saveStateForUndo();
+        final newBlocks = <Block>[];
+        for (final name in names) {
+          final newBlock = Block(
+            id: _generateId(),
+            type: 'Разминка',
+            label: name,
+            sets: [],
+          );
+          newBlocks.add(newBlock);
+        }
+        _session.blocks.addAll(newBlocks);
+        _context = _session.blocks.last;
+        _closeVoiceChatController.add(null);
+        notifyListeners();
+      } else {
+        _addBotMessage(
+          "Я вас не поняла, повторите, пожалуйста. Количество должно совпадать с числом названий.",
+        );
+        _voskService.startListening();
       }
-      lastSet = Set(id: _generateId(), items: []);
-      lastBlock.sets.add(lastSet);
+    } else {
+      _addBotMessage(
+        "Я вас не поняла, повторите, пожалуйста. Используйте формат 'количество:название1,название2'",
+      );
+      _voskService.startListening();
     }
-    lastSet.items.add(item);
+  }
+
+  void _handleAddSets(String command) {
+    final count = _parseNumberWord(command.trim());
+    if (count > 0 && _context is Block) {
+      final block = _context as Block;
+      _saveStateForUndo();
+      final newSets = <Set>[];
+      for (int i = 0; i < count; i++) {
+        final newSet = Set(
+          id: _generateId(),
+          items: [],
+          label: 'Сет ${block.sets.length + i + 1}',
+        );
+        newSets.add(newSet);
+      }
+      block.sets.addAll(newSets);
+      _context = block.sets.last;
+      _closeVoiceChatController.add(null);
+      notifyListeners();
+    } else {
+      _addBotMessage(
+        "Я вас не поняла, повторите, пожалуйста. Назовите количество сетов, например: 'пять'",
+      );
+      _voskService.startListening();
+    }
+  }
+
+  void _handleAddExercise(String command) {
+    if (_context is! Set) return;
+    final currentSet = _context as Set;
+    var exerciseName = command;
+
+    int? reps;
+    int? duration;
+    double? weight;
+
+    final repsRegex = RegExp(r'(\d+)\s*(раз|повторений|повторения)');
+    final durationRegex = RegExp(r'(\d+)\s*(секунд|сек)');
+    final weightRegex = RegExp(r'(\d+)\s*(килограмм|кг)');
+
+    final repsMatch = repsRegex.firstMatch(command);
+    if (repsMatch != null) {
+      reps = int.tryParse(repsMatch.group(1)!);
+      exerciseName = exerciseName.replaceAll(repsMatch.group(0)!, '').trim();
+    }
+
+    final durationMatch = durationRegex.firstMatch(command);
+    if (durationMatch != null) {
+      duration = int.tryParse(durationMatch.group(1)!);
+      exerciseName = exerciseName.replaceAll(durationMatch.group(0)!, '').trim();
+    }
+
+    final weightMatch = weightRegex.firstMatch(command);
+    if (weightMatch != null) {
+      weight = double.tryParse(weightMatch.group(1)!);
+      exerciseName = exerciseName.replaceAll(weightMatch.group(0)!, '').trim();
+    }
+
+    exerciseName = exerciseName.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    if (exerciseName.isEmpty) {
+      _addBotMessage(
+        "Я вас не поняла, повторите, пожалуйста. Назовите упражнение.",
+      );
+      _voskService.startListening();
+      return;
+    }
+
+    _saveStateForUndo();
+    final newExercise = Exercise(
+      id: _generateId(),
+      name: exerciseName.capitalize(),
+      reps: reps ?? 10,
+      durationSec: duration ?? 30,
+      isRepsBased: duration == null,
+      loadKg: weight,
+    );
+
+    currentSet.items.add(newExercise);
+    _closeVoiceChatController.add(null);
     notifyListeners();
+  }
+
+  int _parseNumberWord(String word) {
+    final Map<String, int> numberWords = {
+      'один': 1, 'одна': 1,
+      'два': 2, 'две': 2,
+      'три': 3,
+      'четыре': 4,
+      'пять': 5,
+      'шесть': 6,
+      'семь': 7,
+      'восемь': 8,
+      'девять': 9,
+      'десять': 10,
+    };
+    return numberWords[word.toLowerCase()] ?? int.tryParse(word) ?? 0;
   }
 
   void updateBlockLabel(Block block, String label) {
@@ -185,25 +303,36 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
-  void addBlock() {
-    _session.blocks.add(
-      Block(id: _generateId(), type: 'Основная часть', sets: []),
+  void addBlock([String? label]) {
+    _saveStateForUndo();
+    final newBlock = Block(
+      id: _generateId(),
+      type: 'Основная часть',
+      label: label,
+      sets: [],
     );
+    _session.blocks.add(newBlock);
+    _context = newBlock;
     notifyListeners();
   }
 
-  void addSet(Block block) {
-    block.sets.add(Set(id: _generateId(), items: []));
+  void addSet(Block block, [String? label]) {
+    _saveStateForUndo();
+    final newSet = Set(id: _generateId(), items: [], label: label);
+    block.sets.add(newSet);
+    _context = newSet;
     notifyListeners();
   }
 
-  void addExercise(Set set) {
-    set.items.add(Exercise(id: _generateId(), name: 'Новое упражнение'));
+  void addExercise(Set set, [String name = 'Новое упражнение']) {
+    _saveStateForUndo();
+    set.items.add(Exercise(id: _generateId(), name: name));
     notifyListeners();
   }
 
-  void addRest(Set set) {
-    set.items.add(Rest(id: _generateId(), durationSec: 60));
+  void addRest(Set set, [int duration = 60]) {
+    _saveStateForUndo();
+    set.items.add(Rest(id: _generateId(), durationSec: duration));
     notifyListeners();
   }
 
@@ -213,6 +342,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   }
 
   void duplicateBlock(int blockIndex) {
+    _saveStateForUndo();
     final originalBlock = _session.blocks[blockIndex];
     final newBlock = originalBlock.copyWith(
       id: _generateId(),
@@ -230,6 +360,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   }
 
   void duplicateSet(Block block, Set originalSet) {
+    _saveStateForUndo();
     final newSet = originalSet.copyWith(
       id: _generateId(),
       items: originalSet.items
@@ -242,6 +373,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   }
 
   void duplicateItem(Set set, SetItem originalItem) {
+    _saveStateForUndo();
     final newItem = originalItem.copyWith(id: _generateId());
     final originalIndex = set.items.indexOf(originalItem);
     set.items.insert(originalIndex + 1, newItem);
@@ -263,21 +395,25 @@ class EditWorkoutNotifier extends ChangeNotifier {
   }
 
   void deleteBlock(int blockIndex) {
+    _saveStateForUndo();
     _session.blocks.removeAt(blockIndex);
     notifyListeners();
   }
 
   void deleteSet(Block block, Set setToDelete) {
+    _saveStateForUndo();
     block.sets.remove(setToDelete);
     notifyListeners();
   }
 
   void deleteItem(Set set, SetItem itemToDelete) {
+    _saveStateForUndo();
     set.items.remove(itemToDelete);
     notifyListeners();
   }
 
   void updateSetRepeat(Set set, int newCount) {
+    _saveStateForUndo();
     if (newCount > 0) {
       set.repeat = newCount;
       notifyListeners();
@@ -285,6 +421,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   }
 
   void reorderBlock(int oldIndex, int newIndex) {
+    _saveStateForUndo();
     if (newIndex > oldIndex) {
       newIndex -= 1;
     }
@@ -293,7 +430,18 @@ class EditWorkoutNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  void reorderSetsInBlock(Block block, int oldIndex, int newIndex) {
+    _saveStateForUndo();
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    final set = block.sets.removeAt(oldIndex);
+    block.sets.insert(newIndex, set);
+    notifyListeners();
+  }
+
   void reorderSetItem(Set set, int oldIndex, int newIndex) {
+    _saveStateForUndo();
     if (newIndex > oldIndex) newIndex -= 1;
     final item = set.items.removeAt(oldIndex);
     set.items.insert(newIndex, item);

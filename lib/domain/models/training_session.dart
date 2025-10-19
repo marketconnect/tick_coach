@@ -10,6 +10,21 @@ class TrainingSession {
     this.notes,
     List<Block>? blocks,
   }) : blocks = blocks ?? [];
+
+  // copyWith
+  TrainingSession copyWith({
+    String? id,
+    String? name,
+    String? notes,
+    List<Block>? blocks,
+  }) {
+    return TrainingSession(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      notes: notes ?? this.notes,
+      blocks: blocks ?? List.from(this.blocks),
+    );
+  }
 }
 
 class Block {

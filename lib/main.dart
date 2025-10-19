@@ -29,7 +29,11 @@ class AppWrapper extends StatelessWidget {
           dispose: (_, service) => service.dispose(),
         ),
         Provider<VoskService>(
-          create: (_) => VoskService.instance,
+          create: (_) {
+            final service = VoskService.instance;
+            service.initialize('assets/models/vosk-model-small-ru-0.22.zip');
+            return service;
+          },
           dispose: (_, service) => service.dispose(),
         ),
         ProxyProvider<DatabaseHelper, WorkoutRepository>(
