@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'dart:math';
-import 'package:collection/collection.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +14,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
   final VoskService _voskService;
   late TrainingSession _session;
   TrainingSession? _previousSession;
+
+  int _pendingBlocksCount = 0;
+  final List<String> _collectedBlockNames = [];
 
   EditWorkoutNotifier(
     this._workoutRepository,
@@ -124,9 +127,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
       await _voskService.startListening();
       // New logic for contextual prompt
       if (_session.blocks.isEmpty || _context is TrainingSession) {
-        _addBotMessage(
-          'Перечислите количество и названия блоков, которые хотите добавить? Пример: "три:Разминка,Основной блок,Заминка"',
-        );
+        _addBotMessage('Сколько блоков хотите добавить?');
       } else if (_context is Block) {
         _addBotMessage('Сколько сетов хотите добавить? Пример: "пять".');
       } else if (_context is Set) {
@@ -137,9 +138,12 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
-  void _handleVoiceCommand(String command) {
+  void _handleVoiceCommand(String command) async {
     debugPrint('VOICE COMMAND RECEIVED: "$command"');
     if (command.isEmpty) return;
+
+    // Stop listening as soon as we receive a command to process it.
+    await _voskService.stopListening();
 
     _conversationLog.add("You: $command");
     notifyListeners();
@@ -148,8 +152,12 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
     if (normalizedCommand == 'отмена' || normalizedCommand == 'отменить') {
       undo();
+      _pendingBlocksCount = 0;
+      _collectedBlockNames.clear();
+    } else if (_pendingBlocksCount > 0) {
+      _handleBlockNameInput(command);
     } else if (_session.blocks.isEmpty || _context is TrainingSession) {
-      _handleAddBlocks(normalizedCommand);
+      _handleBlockCountInput(normalizedCommand);
     } else if (_context is Block) {
       _handleAddSets(normalizedCommand);
     } else if (_context is Set) {
@@ -159,42 +167,49 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
-  void _handleAddBlocks(String command) {
-    final match = RegExp(r'(\S+):(.+)').firstMatch(command);
-    if (match != null) {
-      final countWord = match.group(1)!;
-      final namesStr = match.group(2)!;
-      final count = _parseNumberWord(countWord);
-      final names =
-          namesStr.split(',').map((e) => e.trim().capitalize()).toList();
-
-      if (count > 0 && names.isNotEmpty && count == names.length) {
-        _saveStateForUndo();
-        final newBlocks = <Block>[];
-        for (final name in names) {
-          final newBlock = Block(
-            id: _generateId(),
-            type: 'Разминка',
-            label: name,
-            sets: [],
-          );
-          newBlocks.add(newBlock);
-        }
-        _session.blocks.addAll(newBlocks);
-        _context = _session.blocks.last;
-        _closeVoiceChatController.add(null);
-        notifyListeners();
-      } else {
-        _addBotMessage(
-          "Я вас не поняла, повторите, пожалуйста. Количество должно совпадать с числом названий.",
-        );
-        _voskService.startListening();
-      }
+  void _handleBlockCountInput(String command) {
+    final count = _parseNumberWord(command);
+    if (count > 0) {
+      _pendingBlocksCount = count;
+      _collectedBlockNames.clear();
+      _addBotMessage('Назовите название для блока 1.');
+      _voskService.startListening();
     } else {
       _addBotMessage(
-        "Я вас не поняла, повторите, пожалуйста. Используйте формат 'количество:название1,название2'",
+        "Я не поняла число. Пожалуйста, назовите количество блоков, например: 'три'",
       );
       _voskService.startListening();
+    }
+  }
+
+  void _handleBlockNameInput(String command) {
+    _collectedBlockNames.add(command.capitalize());
+
+    if (_collectedBlockNames.length < _pendingBlocksCount) {
+      _addBotMessage(
+        'Отлично. Назовите название для блока ${_collectedBlockNames.length + 1}.',
+      );
+      _voskService.startListening();
+    } else {
+      _saveStateForUndo();
+      final newBlocks = <Block>[];
+      for (final name in _collectedBlockNames) {
+        final newBlock = Block(
+          id: _generateId(),
+          type: 'Разминка',
+          label: name,
+          sets: [],
+        );
+        newBlocks.add(newBlock);
+      }
+      _session.blocks.addAll(newBlocks);
+      _context = _session.blocks.last;
+      _closeVoiceChatController.add(null);
+      notifyListeners();
+
+      // Reset state
+      _pendingBlocksCount = 0;
+      _collectedBlockNames.clear();
     }
   }
 
@@ -246,7 +261,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
     final durationMatch = durationRegex.firstMatch(command);
     if (durationMatch != null) {
       duration = int.tryParse(durationMatch.group(1)!);
-      exerciseName = exerciseName.replaceAll(durationMatch.group(0)!, '').trim();
+      exerciseName = exerciseName
+          .replaceAll(durationMatch.group(0)!, '')
+          .trim();
     }
 
     final weightMatch = weightRegex.firstMatch(command);
@@ -282,8 +299,10 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   int _parseNumberWord(String word) {
     final Map<String, int> numberWords = {
-      'один': 1, 'одна': 1,
-      'два': 2, 'две': 2,
+      'один': 1,
+      'одна': 1,
+      'два': 2,
+      'две': 2,
       'три': 3,
       'четыре': 4,
       'пять': 5,

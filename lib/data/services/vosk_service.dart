@@ -64,10 +64,6 @@ class VoskService {
             if (text.isNotEmpty) {
               _resultController.add(text);
             }
-            // Stop listening after a final result is received.
-            if (state.value == VoskState.listening) {
-              stopListening();
-            }
           }
         } catch (e) {
           // Ignore parsing errors for partial results
