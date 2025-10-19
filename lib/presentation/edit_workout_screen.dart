@@ -175,16 +175,19 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        minChildSize: 0.4,
-        maxChildSize: 1.0,
-        builder: (BuildContext context, ScrollController scrollController) {
-          return _VoiceChatView(
-            notifier: notifier,
-            scrollController: scrollController,
-          );
-        },
+      builder: (_) => ChangeNotifierProvider<EditWorkoutNotifier>.value(
+        value: notifier,
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          minChildSize: 0.4,
+          maxChildSize: 1.0,
+          builder: (BuildContext context, ScrollController scrollController) {
+            return _VoiceChatView(
+              notifier: notifier,
+              scrollController: scrollController,
+            );
+          },
+        ),
       ),
     );
   }
