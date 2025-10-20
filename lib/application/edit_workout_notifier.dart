@@ -435,18 +435,41 @@ class EditWorkoutNotifier extends ChangeNotifier {
         }
         break;
       case _ExerciseCreationStep.awaitingWeight:
-        final weightRegex = RegExp(r'(\d+|(\d+([.,]\d+)?))\s*(килограмм|кг)');
-        final weightMatch = weightRegex.firstMatch(normalizedCommand);
-        if (weightMatch != null) {
-          final weightStr = weightMatch.group(1)!.replaceAll(',', '.');
-          _exerciseInProgress!.loadKg = double.tryParse(weightStr);
+        String numberPart = normalizedCommand;
+        final weightUnits = ['килограмм', 'кг'];
+
+        for (final unit in weightUnits) {
+          if (normalizedCommand.contains(unit)) {
+            numberPart =
+                normalizedCommand.substring(0, normalizedCommand.indexOf(unit)).trim();
+            break;
+          }
         }
+
+        // Try parsing as a double first (e.g., "12.5", "12,5")
+        double? weightValue = double.tryParse(numberPart.replaceAll(',', '.'));
+
+        // If that fails, try parsing as a word-number
+        if (weightValue == null) {
+          final intValue = _parseNumberWord(numberPart);
+          if (intValue > 0) {
+            weightValue = intValue.toDouble();
+          }
+        }
+
+        if (weightValue != null) {
+          _exerciseInProgress!.loadKg = weightValue;
+        }
+
         _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
         _addBotMessage('Какой темп?');
         _voskService.startListening();
         break;
       case _ExerciseCreationStep.awaitingTempo:
-        _exerciseInProgress!.tempo = command;
+        final parsedTempo = _parseTempo(command);
+        if (parsedTempo.isNotEmpty) {
+          _exerciseInProgress!.tempo = parsedTempo;
+        }
         _finalizeExerciseCreation();
         break;
       default:
@@ -455,15 +478,34 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
+  String _parseTempo(String command) {
+    final singleNumberWords = {
+      'ноль': '0', 'один': '1', 'два': '2', 'три': '3', 'четыре': '4',
+      'пять': '5', 'шесть': '6', 'семь': '7', 'восемь': '8', 'девять': '9',
+    };
+
+    final words = command.toLowerCase().replaceAll('-', ' ').split(' ').where((s) => s.isNotEmpty);
+    final resultParts = <String>[];
+
+    for (final word in words) {
+      if (singleNumberWords.containsKey(word)) {
+        resultParts.add(singleNumberWords[word]!);
+      } else if (int.tryParse(word) != null && word.length == 1) {
+        resultParts.add(word);
+      }
+    }
+
+    return resultParts.join('-');
+  }
+
   int _parseNumberWord(String word) {
     final numberWords = {
       'один': 1, 'одна': 1, 'два': 2, 'две': 2, 'три': 3, 'четыре': 4, 'пять': 5,
       'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
       'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
       'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
-      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
-      'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80,
-      'девяносто': 90,
+      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40, 'пятьдесят': 50,
+      'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80, 'девяносто': 90,
     };
 
     final trimmedText = word.trim().toLowerCase();

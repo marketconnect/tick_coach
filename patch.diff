@@ -1,203 +1,110 @@
 --- a/lib/application/edit_workout_notifier.dart
 +++ b/lib/application/edit_workout_notifier.dart
-@@ -438,65 +438,61 @@
- 
-   void _handleExerciseCreationStep(String command) {
-     final normalizedCommand = command.toLowerCase();
--    final skipWords = ['пропустить', 'дальше', 'не знаю', 'пропуск'];
--
--    if (skipWords.contains(normalizedCommand)) {
--      switch (_exerciseCreationStep) {
--        case _ExerciseCreationStep.awaitingRepsOrTime:
--          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
--          _addBotMessage('Какой вес?');
--          _voskService.startListening();
--          break;
--        case _ExerciseCreationStep.awaitingWeight:
--          _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
--          _addBotMessage('Какой темп?');
--          _voskService.startListening();
--          break;
--        case _ExerciseCreationStep.awaitingTempo:
--          _finalizeExerciseCreation();
--          break;
--        default:
--          break;
--      }
--      return;
--    }
--
--    switch (_exerciseCreationStep) {
--      case _ExerciseCreationStep.awaitingRepsOrTime:
--        final repsRegex = RegExp(r'(\d+)\s*(раз|повторений|повторения)');
--        final durationRegex = RegExp(r'(\d+)\s*(секунд|сек)');
--
--        final repsMatch = repsRegex.firstMatch(normalizedCommand);
--        final durationMatch = durationRegex.firstMatch(normalizedCommand);
--
--        if (repsMatch != null) {
--          _exerciseInProgress!.reps = int.tryParse(repsMatch.group(1)!) ?? 10;
--          _exerciseInProgress!.isRepsBased = true;
--        } else if (durationMatch != null) {
--          _exerciseInProgress!.durationSec =
--              int.tryParse(durationMatch.group(1)!) ?? 30;
--          _exerciseInProgress!.isRepsBased = false;
+@@ -516,21 +516,48 @@
+         }
+         break;
+       case _ExerciseCreationStep.awaitingWeight:
+-        final weightRegex = RegExp(r'(\d+|(\d+([.,]\d+)?))\s*(килограмм|кг)');
+-        final weightMatch = weightRegex.firstMatch(normalizedCommand);
+-        if (weightMatch != null) {
+-          final weightStr = weightMatch.group(1)!.replaceAll(',', '.');
+-          _exerciseInProgress!.loadKg = double.tryParse(weightStr);
 -        }
--
--        final number = _parseNumberWord(normalizedCommand);
--        if (repsMatch == null && durationMatch == null && number > 0) {
--          _pendingRepsOrTimeValue = number;
--          _exerciseCreationStep =
--              _ExerciseCreationStep.awaitingRepsOrTimeClarification;
--          _addBotMessage('$number повторений или секунд?');
--          _voskService.startListening();
--        } else if (repsMatch != null || durationMatch != null) {
--          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
--          _addBotMessage('Какой вес?');
--          _voskService.startListening();
--        } else {
--          _addBotMessage('Не поняла. Сколько повторений или секунд?');
--          _voskService.startListening();
--        }
--        break;
--      case _ExerciseCreationStep.awaitingRepsOrTimeClarification:
-+    final skipWords = ['пропустить', 'дальше', 'не знаю', 'пропуск'];
-+
-+    if (skipWords.contains(normalizedCommand)) {
-+      switch (_exerciseCreationStep) {
-+        case _ExerciseCreationStep.awaitingRepsOrTime:
-+          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
-+          _addBotMessage('Какой вес?');
-+          _voskService.startListening();
-+          break;
-+        case _ExerciseCreationStep.awaitingWeight:
-+          _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
-+          _addBotMessage('Какой темп?');
-+          _voskService.startListening();
-+          break;
-+        case _ExerciseCreationStep.awaitingTempo:
-+          _finalizeExerciseCreation();
-+          break;
-+        default:
-+          break;
-+      }
-+      return;
-+    }
-+
-+    switch (_exerciseCreationStep) {
-+      case _ExerciseCreationStep.awaitingRepsOrTime:
-+        final repsWords = ['раз', 'повторений', 'повторения', 'повторов'];
-+        final secsWords = ['секунд', 'сек'];
 +        String numberPart = normalizedCommand;
-+        String? unit;
++        final weightUnits = ['килограмм', 'кг'];
 +
-+        for (final word in repsWords) {
-+          if (normalizedCommand.contains(word)) {
-+            unit = 'reps';
++        for (final unit in weightUnits) {
++          if (normalizedCommand.contains(unit)) {
 +            numberPart =
-+                normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
++                normalizedCommand.substring(0, normalizedCommand.indexOf(unit)).trim();
 +            break;
 +          }
 +        }
 +
-+        if (unit == null) {
-+          for (final word in secsWords) {
-+            if (normalizedCommand.contains(word)) {
-+              unit = 'secs';
-+              numberPart =
-+                  normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
-+              break;
-+            }
++        // Try parsing as a double first (e.g., "12.5", "12,5")
++        double? weightValue = double.tryParse(numberPart.replaceAll(',', '.'));
++
++        // If that fails, try parsing as a word-number
++        if (weightValue == null) {
++          final intValue = _parseNumberWord(numberPart);
++          if (intValue > 0) {
++            weightValue = intValue.toDouble();
 +          }
 +        }
 +
-+        final value = _parseNumberWord(numberPart);
-+
-+        if (value > 0) {
-+          if (unit == 'reps') {
-+            _exerciseInProgress!.reps = value;
-+            _exerciseInProgress!.isRepsBased = true;
-+            _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
-+            _addBotMessage('Какой вес?');
-+            _voskService.startListening();
-+          } else if (unit == 'secs') {
-+            _exerciseInProgress!.durationSec = value;
-+            _exerciseInProgress!.isRepsBased = false;
-+            _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
-+            _addBotMessage('Какой вес?');
-+            _voskService.startListening();
-+          } else {
-+            // No unit found, but a number was.
-+            _pendingRepsOrTimeValue = value;
-+            _exerciseCreationStep =
-+                _ExerciseCreationStep.awaitingRepsOrTimeClarification;
-+            _addBotMessage('$value повторений или секунд?');
-+            _voskService.startListening();
-+          }
-+        } else {
-+          // No valid number found.
-+          _addBotMessage('Не поняла. Сколько повторений или секунд?');
-+          _voskService.startListening();
++        if (weightValue != null) {
++          _exerciseInProgress!.loadKg = weightValue;
 +        }
-+        break;
-+      case _ExerciseCreationStep.awaitingRepsOrTimeClarification:
-         if (normalizedCommand.contains('повторений') ||
-             normalizedCommand.contains('раз')) {
-           _exerciseInProgress!.reps = _pendingRepsOrTimeValue!;
-@@ -539,21 +535,40 @@
++
+         _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
+         _addBotMessage('Какой темп?');
+         _voskService.startListening();
+         break;
+       case _ExerciseCreationStep.awaitingTempo:
+-        _exerciseInProgress!.tempo = command;
++        final parsedTempo = _parseTempo(command);
++        if (parsedTempo.isNotEmpty) {
++          _exerciseInProgress!.tempo = parsedTempo;
++        }
+         _finalizeExerciseCreation();
+         break;
+       default:
+         _resetExerciseCreation();
+         break;
+     }
    }
- 
-   int _parseNumberWord(String word) {
--    final Map<String, int> numberWords = {
--      'один': 1,
--      'одна': 1,
--      'два': 2,
--      'две': 2,
--      'три': 3,
--      'четыре': 4,
--      'пять': 5,
--      'шесть': 6,
--      'семь': 7,
--      'восемь': 8,
--      'девять': 9,
--      'десять': 10,
--      'двенадцать': 12,
--      'пятнадцать': 15,
--    };
--    return numberWords[word.toLowerCase()] ?? int.tryParse(word) ?? 0;
-+    final numberWords = {
-+      'один': 1, 'одна': 1, 'два': 2, 'две': 2, 'три': 3, 'четыре': 4, 'пять': 5,
-+      'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
-+      'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
-+      'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
-+      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
-+      'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80,
-+      'девяносто': 90,
++
++  String _parseTempo(String command) {
++    final singleNumberWords = {
++      'ноль': '0', 'один': '1', 'два': '2', 'три': '3', 'четыре': '4',
++      'пять': '5', 'шесть': '6', 'семь': '7', 'восемь': '8', 'девять': '9',
 +    };
 +
-+    final trimmedText = word.trim().toLowerCase();
-+
-+    // First, try to parse the whole string as a digit
-+    final digit = int.tryParse(trimmedText);
-+    if (digit != null) {
-+      return digit;
-+    }
-+
-+    // If not a digit, parse as words
-+    final words = trimmedText.split(' ');
-+    int value = 0;
++    final words = command.toLowerCase().replaceAll('-', ' ').split(' ').where((s) => s.isNotEmpty);
++    final resultParts = <String>[];
 +
 +    for (final word in words) {
-+      final numVal = numberWords[word];
-+      if (numVal != null) {
-+        value += numVal;
-+      } else {
-+        // If a word is not a number, parsing fails for the whole phrase
-+        return 0;
++      if (singleNumberWords.containsKey(word)) {
++        resultParts.add(singleNumberWords[word]!);
++      } else if (int.tryParse(word) != null && word.length == 1) {
++        resultParts.add(word);
 +      }
 +    }
 +
-+    return value;
-   }
++    return resultParts.join('-');
++  }
  
-   void updateBlockLabel(Block block, String label) {
+   int _parseNumberWord(String word) {
+     final numberWords = {
+@@ -538,28 +565,29 @@
+       'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
+       'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
+       'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
+-      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
+-      'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80,
+-      'девяносто': 90,
++      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40, 'пятьдесят': 50,
++      'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80, 'девяносто': 90,
+     };
+ 
+     final trimmedText = word.trim().toLowerCase();
+ 
+     // First, try to parse the whole string as a digit
+     final digit = int.tryParse(trimmedText);
+     if (digit != null) {
+       return digit;
+     }
+ 
+     // If not a digit, parse as words
+     final words = trimmedText.split(' ');
+     int value = 0;
+ 
+     for (final word in words) {
+       final numVal = numberWords[word];
+       if (numVal != null) {
+         value += numVal;
+       } else {
+         // If a word is not a number, parsing fails for the whole phrase
+         return 0;
+       }
+     }
