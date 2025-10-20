@@ -826,7 +826,7 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final unitLabel = widget.exercise.isRepsBased ? 'повт.' : 'сек.';
+    final unitLabel = widget.exercise.isRepsBased ? 'пов.' : 'сек.';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -878,7 +878,7 @@ class _ExerciseItemCardState extends State<_ExerciseItemCard> {
                           ),
                           Flexible(
                             child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 60),
+                              constraints: const BoxConstraints(maxWidth: 80),
                               child: TextField(
                                 controller: _valueController,
                                 textAlign: TextAlign.center,
@@ -1187,7 +1187,7 @@ class _RestItemCardState extends State<_RestItemCard> {
                     ),
                     Flexible(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 60),
+                        constraints: const BoxConstraints(maxWidth: 80),
                         child: TextField(
                           controller: _durationController,
                           textAlign: TextAlign.center,

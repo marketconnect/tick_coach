@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +9,7 @@ import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
 import 'workout_preview_screen.dart';
 import 'agent_entry.dart';
+import 'dart:math';
 
 // The main screen widget
 class WorkoutsScreen extends StatefulWidget {
@@ -383,10 +383,51 @@ class TrainingSessionCard extends StatelessWidget {
                                 );
                                 break;
                               case 'duplicate':
-                                // await DatabaseHelper.instance.duplicateWorkout(
-                                //   session.id,
-                                // );
-                                onWorkoutUpdated();
+                                final repo = Provider.of<WorkoutRepository>(
+                                  context,
+                                  listen: false,
+                                );
+                                final messenger = ScaffoldMessenger.of(context);
+                                try {
+                                  final originalSession =
+                                      await repo.getTrainingSession(session.id);
+                                  if (originalSession == null) {
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Не удалось найти тренировку для копирования',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  String generateId() =>
+                                      '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+                                  final newSession = originalSession.copyWith(
+                                    id: generateId(),
+                                    name: '${originalSession.name} (1)',
+                                    blocks: originalSession.blocks.map((block) {
+                                      return block.copyWith(
+                                        id: generateId(),
+                                        sets: block.sets.map((set) {
+                                          return set.copyWith(
+                                            id: generateId(),
+                                            items: set.items.map((item) {
+                                              return item.copyWith(
+                                                id: generateId(),
+                                              );
+                                            }).toList(),
+                                          );
+                                        }).toList(),
+                                      );
+                                    }).toList(),
+                                  );
+                                  await repo.saveTrainingSession(newSession);
+                                  messenger.showSnackBar(SnackBar(content: Text('Тренировка "${session.name}" скопирована')));
+                                  onWorkoutUpdated();
+                                } catch (e) {
+                                  messenger.showSnackBar(const SnackBar(content: Text('Ошибка при копировании тренировки')));
+                                }
                                 break;
                               case 'delete':
                                 final confirmed = await showDialog<bool>(
@@ -439,13 +480,7 @@ class TrainingSessionCard extends StatelessWidget {
                                     title: Text('Просмотр'),
                                   ),
                                 ),
-                                const PopupMenuItem(
-                                  value: 'settings',
-                                  child: ListTile(
-                                    leading: Icon(Icons.tune),
-                                    title: Text('Настройки'),
-                                  ),
-                                ),
+
                                 const PopupMenuItem(
                                   value: 'notes',
                                   child: ListTile(
@@ -461,27 +496,7 @@ class TrainingSessionCard extends StatelessWidget {
                                     title: Text('Копировать'),
                                   ),
                                 ),
-                                const PopupMenuItem(
-                                  value: 'shuffle',
-                                  child: ListTile(
-                                    leading: Icon(Icons.shuffle),
-                                    title: Text('Перемешать'),
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'share',
-                                  child: ListTile(
-                                    leading: Icon(Icons.share),
-                                    title: Text('Поделиться'),
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'shortcut',
-                                  child: ListTile(
-                                    leading: Icon(Icons.link),
-                                    title: Text('Создать ярлык'),
-                                  ),
-                                ),
+
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'delete',
