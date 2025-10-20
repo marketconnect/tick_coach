@@ -38,7 +38,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   // --- Chatbot State ---
 
-  List<(String, bool)> _conversationLog = []; // message, isUser
+  final List<(String, bool)> _conversationLog = []; // message, isUser
   List<(String, bool)> get conversationLog => _conversationLog;
 
   Object? _context;
@@ -380,8 +380,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
         for (final word in repsWords) {
           if (normalizedCommand.contains(word)) {
             unit = 'reps';
-            numberPart =
-                normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+            numberPart = normalizedCommand
+                .substring(0, normalizedCommand.indexOf(word))
+                .trim();
             break;
           }
         }
@@ -390,8 +391,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
           for (final word in secsWords) {
             if (normalizedCommand.contains(word)) {
               unit = 'secs';
-              numberPart =
-                  normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+              numberPart = normalizedCommand
+                  .substring(0, normalizedCommand.indexOf(word))
+                  .trim();
               break;
             }
           }
@@ -453,8 +455,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
         for (final unit in weightUnits) {
           if (normalizedCommand.contains(unit)) {
-            numberPart =
-                normalizedCommand.substring(0, normalizedCommand.indexOf(unit)).trim();
+            numberPart = normalizedCommand
+                .substring(0, normalizedCommand.indexOf(unit))
+                .trim();
             break;
           }
         }
@@ -492,8 +495,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
         final secsWords = ['секунд', 'сек'];
         for (final word in secsWords) {
           if (normalizedCommand.contains(word)) {
-            numberPart =
-                normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+            numberPart = normalizedCommand
+                .substring(0, normalizedCommand.indexOf(word))
+                .trim();
             break;
           }
         }
@@ -508,11 +512,23 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   String _parseTempo(String command) {
     final singleNumberWords = {
-      'ноль': '0', 'один': '1', 'два': '2', 'три': '3', 'четыре': '4',
-      'пять': '5', 'шесть': '6', 'семь': '7', 'восемь': '8', 'девять': '9',
+      'ноль': '0',
+      'один': '1',
+      'два': '2',
+      'три': '3',
+      'четыре': '4',
+      'пять': '5',
+      'шесть': '6',
+      'семь': '7',
+      'восемь': '8',
+      'девять': '9',
     };
 
-    final words = command.toLowerCase().replaceAll('-', ' ').split(' ').where((s) => s.isNotEmpty);
+    final words = command
+        .toLowerCase()
+        .replaceAll('-', ' ')
+        .split(' ')
+        .where((s) => s.isNotEmpty);
     final resultParts = <String>[];
 
     for (final word in words) {
@@ -528,14 +544,44 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   int _parseNumberWord(String word) {
     final numberWords = {
-      'один': 1, 'одна': 1, 'два': 2, 'две': 2, 'три': 3, 'четыре': 4, 'пять': 5,
-      'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
-      'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
-      'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
-      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40, 'пятьдесят': 50,
-      'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80, 'девяносто': 90,
-      'сто': 100, 'двести': 200, 'триста': 300, 'четыреста': 400, 'пятьсот': 500,
-      'шестьсот': 600, 'семьсот': 700, 'восемьсот': 800, 'девятьсот': 900,
+      'один': 1,
+      'одна': 1,
+      'два': 2,
+      'две': 2,
+      'три': 3,
+      'четыре': 4,
+      'пять': 5,
+      'шесть': 6,
+      'семь': 7,
+      'восемь': 8,
+      'девять': 9,
+      'десять': 10,
+      'одиннадцать': 11,
+      'двенадцать': 12,
+      'тринадцать': 13,
+      'четырнадцать': 14,
+      'пятнадцать': 15,
+      'шестнадцать': 16,
+      'семнадцать': 17,
+      'восемнадцать': 18,
+      'девятнадцать': 19,
+      'двадцать': 20,
+      'тридцать': 30,
+      'сорок': 40,
+      'пятьдесят': 50,
+      'шестьдесят': 60,
+      'семьдесят': 70,
+      'восемьдесят': 80,
+      'девяносто': 90,
+      'сто': 100,
+      'двести': 200,
+      'триста': 300,
+      'четыреста': 400,
+      'пятьсот': 500,
+      'шестьсот': 600,
+      'семьсот': 700,
+      'восемьсот': 800,
+      'девятьсот': 900,
     };
 
     final trimmedText = word.trim().toLowerCase();
@@ -735,7 +781,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
 enum _ExerciseCreationStep {
   none,
-  awaitingName,
+  // awaitingName,
   awaitingRepsOrTime,
   awaitingRepsOrTimeClarification,
   awaitingWeight,

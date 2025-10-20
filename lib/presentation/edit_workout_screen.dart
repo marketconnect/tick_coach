@@ -237,11 +237,14 @@ class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
     return ReorderableListView.builder(
       scrollController: _scrollController,
       buildDefaultDragHandles: false,
-      proxyDecorator: (widget, index, animation) {
-        return Material(
-          elevation: 4.0,
-          color: Colors.transparent,
-          child: widget,
+      proxyDecorator: (child, index, animation) {
+        return ChangeNotifierProvider.value(
+          value: notifier,
+          child: Material(
+            elevation: 4.0,
+            color: Colors.transparent,
+            child: child,
+          ),
         );
       },
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
@@ -436,6 +439,12 @@ class _BlockCard extends StatelessWidget {
       child: ExpansionTile(
         key: ValueKey('block_${block.id}'),
         initiallyExpanded: notifier.expandedBlockId == block.id,
+        shape: const RoundedRectangleBorder(
+          side: BorderSide(color: Colors.transparent),
+        ),
+        collapsedShape: const RoundedRectangleBorder(
+          side: BorderSide(color: Colors.transparent),
+        ),
         onExpansionChanged: (_) => notifier.toggleBlockExpansion(block.id),
         title: Row(
           children: [
@@ -485,11 +494,14 @@ class _BlockCard extends StatelessWidget {
         children: [
           ReorderableListView.builder(
             buildDefaultDragHandles: false,
-            proxyDecorator: (widget, index, animation) {
-              return Material(
-                elevation: 4.0,
-                color: Colors.transparent,
-                child: widget,
+            proxyDecorator: (child, index, animation) {
+              return ChangeNotifierProvider.value(
+                value: notifier,
+                child: Material(
+                  elevation: 4.0,
+                  color: Colors.transparent,
+                  child: child,
+                ),
               );
             },
             itemCount: block.sets.length,
@@ -594,6 +606,12 @@ class _SetCard extends StatelessWidget {
         child: ExpansionTile(
           key: ValueKey('set_${set.id}'),
           initiallyExpanded: notifier.expandedSetId == set.id,
+          shape: const RoundedRectangleBorder(
+            side: BorderSide(color: Colors.transparent),
+          ),
+          collapsedShape: const RoundedRectangleBorder(
+            side: BorderSide(color: Colors.transparent),
+          ),
           onExpansionChanged: (_) => notifier.toggleSetExpansion(set.id, block),
           leading: ReorderableDragStartListener(
             index: index,
@@ -635,11 +653,14 @@ class _SetCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
               child: ReorderableListView.builder(
                 buildDefaultDragHandles: false,
-                proxyDecorator: (widget, index, animation) {
-                  return Material(
-                    elevation: 4.0,
-                    color: Colors.transparent,
-                    child: widget,
+                proxyDecorator: (child, index, animation) {
+                  return ChangeNotifierProvider.value(
+                    value: notifier,
+                    child: Material(
+                      elevation: 4.0,
+                      color: Colors.transparent,
+                      child: child,
+                    ),
                   );
                 },
                 shrinkWrap: true,
@@ -1331,7 +1352,8 @@ class _VoiceChatView extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: notifier.conversationLog.length,
                   itemBuilder: (context, index) {
-                    final (message, isUserMessage) = notifier.conversationLog[index];
+                    final (message, isUserMessage) =
+                        notifier.conversationLog[index];
                     final alignment = isUserMessage
                         ? Alignment.centerRight
                         : Alignment.centerLeft;
