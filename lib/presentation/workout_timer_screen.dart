@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
+import 'package:tick_coach/presentation/workout_preview_screen.dart';
 import 'package:tick_coach/domain/repositories/workout_repository.dart';
 
 class TimerStep {
@@ -126,7 +127,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_remainingTime == 5) {
+      if (_remainingTime == 4) {
         _audioPlayer.play(AssetSource('sounds/start.mp3'));
       }
       if (_remainingTime > 1) {
@@ -269,6 +270,41 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         title: Text(widget.session.name),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Обзор тренировки',
+            onPressed: () {
+              String? highlightedId;
+              final currentItem = _workoutPlan[_currentIntervalIndex].item;
+
+              if (currentItem is Exercise) {
+                highlightedId = currentItem.id;
+              } else if (currentItem is Rest) {
+                for (
+                  int i = _currentIntervalIndex + 1;
+                  i < _workoutPlan.length;
+                  i++
+                ) {
+                  final nextItem = _workoutPlan[i].item;
+                  if (nextItem is Exercise) {
+                    highlightedId = nextItem.id;
+                    break;
+                  }
+                }
+              }
+
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => WorkoutPreviewScreen(
+                    session: widget.session,
+                    highlightedItemId: highlightedId,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
 
       body: LayoutBuilder(
@@ -343,9 +379,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                             fit: BoxFit.scaleDown,
                             child: Text(
                               '${currentItem.reps}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displayLarge
+                              style: Theme.of(context).textTheme.displayLarge
                                   ?.copyWith(
                                     fontSize: 100,
                                     fontWeight: FontWeight.bold,
@@ -363,9 +397,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                             fit: BoxFit.scaleDown,
                             child: Text(
                               _formatDuration(_remainingTime),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displayLarge
+                              style: Theme.of(context).textTheme.displayLarge
                                   ?.copyWith(
                                     fontSize: 100,
                                     fontWeight: FontWeight.bold,
@@ -389,16 +421,15 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         },
       ),
 
-      floatingActionButton:
-          (currentItem is Exercise && currentItem.isRepsBased)
-              ? null
-              : FloatingActionButton.large(
-                  onPressed: () {
-                    HapticFeedback.selectionClick();
-                    _isPaused ? _startTimer() : _pauseTimer();
-                  },
-                  child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-                ),
+      floatingActionButton: (currentItem is Exercise && currentItem.isRepsBased)
+          ? null
+          : FloatingActionButton.large(
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                _isPaused ? _startTimer() : _pauseTimer();
+              },
+              child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
