@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:tick_coach/application/create_rounds_notifier.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
@@ -96,7 +97,7 @@ class _CreateRoundsScreenViewState extends State<_CreateRoundsScreenView> {
             textCapitalization: TextCapitalization.sentences,
           ),
           const SizedBox(height: 24),
-          _buildRoundsSlider(notifier),
+          const _RoundsStepper(),
           const SizedBox(height: 16),
           _TimeInputRow(
             label: 'Время раунда',
@@ -134,25 +135,6 @@ class _CreateRoundsScreenViewState extends State<_CreateRoundsScreenView> {
     );
   }
 
-  Widget _buildRoundsSlider(CreateRoundsNotifier notifier) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Количество раундов: ${notifier.config.roundCount}',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        Slider(
-          value: notifier.config.roundCount.toDouble(),
-          min: 1,
-          max: 50,
-          divisions: 49,
-          label: notifier.config.roundCount.toString(),
-          onChanged: notifier.updateRoundCount,
-        ),
-      ],
-    );
-  }
 }
 
 class _TimeInputRow extends StatefulWidget {
@@ -259,6 +241,125 @@ class _TimeInputRowState extends State<_TimeInputRow> {
               border: OutlineInputBorder(),
             ),
             onChanged: (_) => _notifyChange(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RoundsStepper extends StatefulWidget {
+  const _RoundsStepper();
+
+  @override
+  State<_RoundsStepper> createState() => _RoundsStepperState();
+}
+
+class _RoundsStepperState extends State<_RoundsStepper> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+  late final CreateRoundsNotifier _notifier;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifier = context.read<CreateRoundsNotifier>();
+    _controller = TextEditingController(
+      text: _notifier.config.roundCount.toString(),
+    );
+    _notifier.addListener(_onNotifierUpdate);
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _notifier.removeListener(_onNotifierUpdate);
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _controller.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onNotifierUpdate() {
+    final newText = _notifier.config.roundCount.toString();
+    if (_controller.text != newText) {
+      _controller.text = newText;
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+    }
+  }
+
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus) {
+      _notifier.setRoundCount(_controller.text);
+    }
+  }
+
+  void _startAcceleratedChange(void Function() action) {
+    HapticFeedback.selectionClick();
+    action(); // Fire once on long press start
+    _timer = Timer.periodic(const Duration(milliseconds: 150), (timer) {
+      action();
+      HapticFeedback.selectionClick();
+    });
+  }
+
+  void _stopAcceleratedChange() {
+    _timer?.cancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Количество раундов',
+            style: theme.textTheme.titleMedium,
+          ),
+        ),
+        GestureDetector(
+          onLongPressStart: (_) =>
+              _startAcceleratedChange(_notifier.decrementRounds),
+          onLongPressEnd: (_) => _stopAcceleratedChange(),
+          child: IconButton(
+            icon: const Icon(Icons.remove),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _notifier.decrementRounds();
+            },
+          ),
+        ),
+        SizedBox(
+          width: 60,
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              isDense: true,
+            ),
+            onSubmitted: _notifier.setRoundCount,
+          ),
+        ),
+        GestureDetector(
+          onLongPressStart: (_) =>
+              _startAcceleratedChange(_notifier.incrementRounds),
+          onLongPressEnd: (_) => _stopAcceleratedChange(),
+          child: IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _notifier.incrementRounds();
+            },
           ),
         ),
       ],

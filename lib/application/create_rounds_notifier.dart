@@ -33,8 +33,26 @@ class CreateRoundsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateRoundCount(double value) {
-    _config.roundCount = value.toInt();
+  void incrementRounds() {
+    if (_config.roundCount < 100) {
+      _config.roundCount++;
+      notifyListeners();
+    }
+  }
+
+  void decrementRounds() {
+    if (_config.roundCount > 1) {
+      _config.roundCount--;
+      notifyListeners();
+    }
+  }
+
+  void setRoundCount(String value) {
+    final count = int.tryParse(value);
+    if (count != null) {
+      _config.roundCount = count.clamp(1, 100);
+    }
+    // Always notify to resync UI, e.g., if input was "0" or empty.
     notifyListeners();
   }
 
