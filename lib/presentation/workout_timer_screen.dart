@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
 import 'package:tick_coach/presentation/workout_preview_screen.dart';
 import 'package:tick_coach/domain/repositories/workout_repository.dart';
+import 'package:tick_coach/domain/models/rounds_config.dart';
 
 class TimerStep {
   final SetItem item;
@@ -42,6 +43,10 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   bool _isPaused = true;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
+  // State for rounds-specific logic
+  bool _isRoundsWorkout = false;
+  RoundsConfig? _roundsConfig;
+  bool _isFirstPlay = true;
 
   @override
   void initState() {
@@ -69,7 +74,14 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         });
         return;
       }
-
+      if (session.workoutType == 'rounds' && session.roundsConfigJson != null) {
+        setState(() {
+          _isRoundsWorkout = true;
+          _roundsConfig = RoundsConfig.fromJsonString(
+            session.roundsConfigJson!,
+          );
+        });
+      }
       // Flatten the workout structure into a linear list of steps
       for (final block in session.blocks) {
         for (final set in block.sets) {
@@ -116,20 +128,51 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   }
 
   void _startTimer() {
-    if (_timer != null && _timer!.isActive) return;
     final currentItem = _workoutPlan[_currentIntervalIndex].item;
     if (currentItem is Exercise && currentItem.isRepsBased) {
       // Do not start timer for rep-based exercises
       return;
     }
+
+    if (_isFirstPlay) {
+      _isFirstPlay = false;
+      // Play bell on first round start
+      if (_isRoundsWorkout && currentItem is Exercise) {
+        _audioPlayer.play(AssetSource('sounds/bell-in-the-boxing-ring.mp3'));
+      }
+    }
+
     setState(() {
       _isPaused = false;
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_remainingTime == 4) {
+      // Standard workout countdown sound
+      if (!_isRoundsWorkout && _remainingTime == 5) {
         _audioPlayer.play(AssetSource('sounds/start.mp3'));
       }
+
+      // Rounds workout specific sounds
+
+      if (_isRoundsWorkout &&
+          currentItem is Exercise &&
+          _roundsConfig != null) {
+        // End of round warning (highest priority)
+        if (_roundsConfig!.endOfRoundSignalSec > 0 &&
+            _remainingTime == _roundsConfig!.endOfRoundSignalSec + 1) {
+          _audioPlayer.play(AssetSource('sounds/door-knock-solid-door.mp3'));
+        }
+        // In-round periodic signal (lower priority)
+        else if (_roundsConfig!.inRoundSignalPeriodSec > 0 &&
+            _remainingTime > 0 &&
+            _remainingTime < currentItem.durationSec &&
+            _remainingTime % _roundsConfig!.inRoundSignalPeriodSec == 0) {
+          _audioPlayer.play(
+            AssetSource('sounds/short-ringing-notification-sound.mp3'),
+          );
+        }
+      }
+
       if (_remainingTime > 1) {
         setState(() {
           _remainingTime--;
@@ -148,8 +191,22 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   }
 
   void _moveToNextInterval() {
+    _timer
+        ?.cancel(); // Ensure the old timer is stopped before starting a new one.
     HapticFeedback.selectionClick();
-    if (_currentIntervalIndex < _workoutPlan.length - 1) {
+    final finishedItem = _workoutPlan[_currentIntervalIndex].item;
+    final isLastItem = _currentIntervalIndex >= _workoutPlan.length - 1;
+    if (_isRoundsWorkout) {
+      final nextItem = isLastItem
+          ? null
+          : _workoutPlan[_currentIntervalIndex + 1].item;
+      // Play bell on transitions to/from a round
+      if (finishedItem is Exercise ||
+          (finishedItem is Rest && nextItem is Exercise)) {
+        _audioPlayer.play(AssetSource('sounds/bell-in-the-boxing-ring.mp3'));
+      }
+    }
+    if (!isLastItem) {
       setState(() {
         _currentIntervalIndex++;
         final currentItem = _workoutPlan[_currentIntervalIndex].item;
@@ -162,8 +219,10 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         }
       });
     } else {
-      _timer?.cancel();
-      _audioPlayer.play(AssetSource('sounds/finish.mp3'));
+      if (!_isRoundsWorkout) {
+        // For rounds, bell already played for last round end
+        _audioPlayer.play(AssetSource('sounds/finish.mp3'));
+      }
       setState(() {
         _isPaused = true;
       });

@@ -2,12 +2,16 @@ class TrainingSession {
   String id;
   String name;
   String? notes;
+  String? workoutType; // 'standard' or 'rounds'
+  String? roundsConfigJson;
   List<Block> blocks;
 
   TrainingSession({
     required this.id,
     required this.name,
     this.notes,
+    this.workoutType,
+    this.roundsConfigJson,
     List<Block>? blocks,
   }) : blocks = blocks ?? [];
 
@@ -17,12 +21,16 @@ class TrainingSession {
     String? name,
     String? notes,
     List<Block>? blocks,
+    String? workoutType,
+    String? roundsConfigJson,
   }) {
     return TrainingSession(
       id: id ?? this.id,
       name: name ?? this.name,
       notes: notes ?? this.notes,
       blocks: blocks ?? List.from(this.blocks),
+      workoutType: workoutType ?? this.workoutType,
+      roundsConfigJson: roundsConfigJson ?? this.roundsConfigJson,
     );
   }
 }

@@ -29,7 +29,9 @@ class DatabaseHelper {
       CREATE TABLE training_sessions(
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        notes TEXT
+        notes TEXT,
+        workout_type TEXT,
+        rounds_config_json TEXT
       )
     ''');
 
@@ -95,6 +97,8 @@ class DatabaseHelper {
         'id': session.id,
         'name': session.name,
         'notes': session.notes,
+        'workout_type': session.workoutType,
+        'rounds_config_json': session.roundsConfigJson,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       // Delete old children
       final blockIds = (await txn.query(
@@ -201,6 +205,8 @@ class DatabaseHelper {
       id: sessionMap['id'] as String,
       name: sessionMap['name'] as String,
       notes: sessionMap['notes'] as String?,
+      workoutType: sessionMap['workout_type'] as String?,
+      roundsConfigJson: sessionMap['rounds_config_json'] as String?,
     );
     final blockMaps = await db.query(
       'blocks',
@@ -292,7 +298,11 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getAllTrainingSessions() async {
     final db = await instance.database;
-    return await db.query('training_sessions', orderBy: 'name');
+    return await db.query(
+      'training_sessions',
+      columns: ['id', 'name', 'notes', 'workout_type'],
+      orderBy: 'name',
+    );
   }
 
   Future<void> updateTrainingSessionNotes(

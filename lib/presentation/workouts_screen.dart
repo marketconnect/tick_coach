@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
 import 'package:tick_coach/domain/repositories/workout_repository.dart';
 import 'edit_workout_screen.dart';
+import 'create_rounds_screen.dart';
 import 'workout_timer_screen.dart';
 import 'workout_notes_screen.dart';
 import 'workout_preview_screen.dart';
@@ -125,6 +126,17 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
                     _fetchWorkouts();
                   },
                   child: const Text('Тренировка'),
+                ),
+                MenuItemButton(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const CreateRoundsScreen(),
+                      ),
+                    );
+                    _fetchWorkouts();
+                  },
+                  child: const Text('Раунды'),
                 ),
                 MenuItemButton(
                   onPressed: () {
@@ -322,11 +334,21 @@ class TrainingSessionCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Text(
-                      session.name,
-                      style: theme.textTheme.titleLarge,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: Row(
+                      children: [
+                        if (session.workoutType == 'rounds') ...[
+                          const Icon(Icons.sports_mma, size: 20),
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Text(
+                            session.name,
+                            style: theme.textTheme.titleLarge,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Row(
@@ -356,13 +378,22 @@ class TrainingSessionCard extends StatelessWidget {
                           onSelected: (value) async {
                             switch (value) {
                               case 'edit':
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (context) => EditWorkoutScreen(
-                                      trainingSession: session,
+                                if (session.workoutType == 'rounds') {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          CreateRoundsScreen(session: session),
                                     ),
-                                  ),
-                                );
+                                  );
+                                } else {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => EditWorkoutScreen(
+                                        trainingSession: session,
+                                      ),
+                                    ),
+                                  );
+                                }
                                 onWorkoutUpdated();
                                 break;
                               case 'notes':
@@ -423,7 +454,10 @@ class TrainingSessionCard extends StatelessWidget {
                                     }).toList(),
                                   );
                                   await repo.saveTrainingSession(newSession);
-                                  messenger.showSnackBar(SnackBar(content: Text('Тренировка "${session.name}" скопирована')));
+                                  messenger.showSnackBar(SnackBar(
+                                    content: Text(
+                                        'Тренировка "${session.name}" скопирована'),
+                                  ));
                                   onWorkoutUpdated();
                                 } catch (e) {
                                   messenger.showSnackBar(const SnackBar(content: Text('Ошибка при копировании тренировки')));
