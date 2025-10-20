@@ -651,7 +651,7 @@ class _SetCard extends StatelessWidget {
                   if (item is Exercise) {
                     return Listener(
                       key: ValueKey(item.id),
-                      onPointerDown: (_) => notifier.setContext(item),
+                      onPointerDown: (_) => notifier.setContext(set),
                       child: _ExerciseItemCard(
                         isContext: notifier.context == item,
                         exercise: item,
@@ -668,7 +668,7 @@ class _SetCard extends StatelessWidget {
                   if (item is Rest) {
                     return Listener(
                       key: ValueKey(item.id),
-                      onPointerDown: (_) => notifier.setContext(item),
+                      onPointerDown: (_) => notifier.setContext(set),
                       child: _RestItemCard(
                         isContext: notifier.context == item,
                         rest: item,

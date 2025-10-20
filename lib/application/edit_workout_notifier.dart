@@ -31,6 +31,11 @@ class EditWorkoutNotifier extends ChangeNotifier {
   TrainingSession get session => _session;
   VoskState get voskState => _voskService.state.value;
 
+  // --- Voice Exercise Creation State ---
+  var _exerciseCreationStep = _ExerciseCreationStep.none;
+  Exercise? _exerciseInProgress;
+  int? _pendingRepsOrTimeValue;
+
   // --- Chatbot State ---
 
   List<String> _conversationLog = [];
@@ -171,11 +176,15 @@ class EditWorkoutNotifier extends ChangeNotifier {
       } else if (_context is Block) {
         _addBotMessage('Сколько сетов хотите добавить? Пример: "пять".');
       } else if (_context is Set) {
-        _addBotMessage(
-          'Назовите упражнение, которое хотите добавить? Пример: "отжимания 25 раз." или "бег на месте 30 секунд"',
-        );
+        _addBotMessage('Назовите упражнение, которое хотите добавить?');
       }
     }
+  }
+
+  void _resetExerciseCreation() {
+    _exerciseCreationStep = _ExerciseCreationStep.none;
+    _exerciseInProgress = null;
+    _pendingRepsOrTimeValue = null;
   }
 
   void _handleVoiceCommand(String command) async {
@@ -191,9 +200,16 @@ class EditWorkoutNotifier extends ChangeNotifier {
     final normalizedCommand = command.toLowerCase();
 
     if (normalizedCommand == 'отмена' || normalizedCommand == 'отменить') {
+      if (_exerciseCreationStep != _ExerciseCreationStep.none) {
+        _resetExerciseCreation();
+        _addBotMessage("Добавление упражнения отменено.");
+        return;
+      }
       undo();
       _pendingBlocksCount = 0;
       _collectedBlockNames.clear();
+    } else if (_exerciseCreationStep != _ExerciseCreationStep.none) {
+      _handleExerciseCreationStep(command);
     } else if (_pendingBlocksCount > 0) {
       _handleBlockNameInput(command);
     } else if (_session.blocks.isEmpty || _context is TrainingSession) {
@@ -201,7 +217,14 @@ class EditWorkoutNotifier extends ChangeNotifier {
     } else if (_context is Block) {
       _handleAddSets(normalizedCommand);
     } else if (_context is Set) {
-      _handleAddExercise(normalizedCommand);
+      // This is the first step of creating an exercise: getting the name.
+      _exerciseInProgress = Exercise(
+        id: _generateId(),
+        name: command.capitalize(),
+      );
+      _exerciseCreationStep = _ExerciseCreationStep.awaitingRepsOrTime;
+      _addBotMessage('Отлично. Сколько повторений или секунд?');
+      _voskService.startListening();
     } else {
       _addBotMessage("Я вас не поняла, повторите, пожалуйста.");
     }
@@ -279,80 +302,193 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
-  void _handleAddExercise(String command) {
-    if (_context is! Set) return;
-    final currentSet = _context as Set;
-    var exerciseName = command;
-
-    int? reps;
-    int? duration;
-    double? weight;
-
-    final repsRegex = RegExp(r'(\d+)\s*(раз|повторений|повторения)');
-    final durationRegex = RegExp(r'(\d+)\s*(секунд|сек)');
-    final weightRegex = RegExp(r'(\d+)\s*(килограмм|кг)');
-
-    final repsMatch = repsRegex.firstMatch(command);
-    if (repsMatch != null) {
-      reps = int.tryParse(repsMatch.group(1)!);
-      exerciseName = exerciseName.replaceAll(repsMatch.group(0)!, '').trim();
-    }
-
-    final durationMatch = durationRegex.firstMatch(command);
-    if (durationMatch != null) {
-      duration = int.tryParse(durationMatch.group(1)!);
-      exerciseName = exerciseName
-          .replaceAll(durationMatch.group(0)!, '')
-          .trim();
-    }
-
-    final weightMatch = weightRegex.firstMatch(command);
-    if (weightMatch != null) {
-      weight = double.tryParse(weightMatch.group(1)!);
-      exerciseName = exerciseName.replaceAll(weightMatch.group(0)!, '').trim();
-    }
-
-    exerciseName = exerciseName.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-    if (exerciseName.isEmpty) {
-      _addBotMessage(
-        "Я вас не поняла, повторите, пожалуйста. Назовите упражнение.",
-      );
-      _voskService.startListening();
+  void _finalizeExerciseCreation() {
+    if (_context is! Set || _exerciseInProgress == null) {
+      _resetExerciseCreation();
       return;
     }
-
+    final currentSet = _context as Set;
     _saveStateForUndo();
-    final newExercise = Exercise(
-      id: _generateId(),
-      name: exerciseName.capitalize(),
-      reps: reps ?? 10,
-      durationSec: duration ?? 30,
-      isRepsBased: duration == null,
-      loadKg: weight,
-    );
+    currentSet.items.add(_exerciseInProgress!);
 
-    currentSet.items.add(newExercise);
+    var confirmation = 'Готово, добавила ${_exerciseInProgress!.name}';
+    if (_exerciseInProgress!.isRepsBased) {
+      confirmation += ', ${_exerciseInProgress!.reps} повторений';
+    } else {
+      confirmation += ', ${_exerciseInProgress!.durationSec} секунд';
+    }
+    if (_exerciseInProgress!.loadKg != null) {
+      confirmation += ', вес ${_exerciseInProgress!.loadKg} кг';
+    }
+    if (_exerciseInProgress!.tempo != null &&
+        _exerciseInProgress!.tempo!.isNotEmpty) {
+      confirmation += ', темп ${_exerciseInProgress!.tempo}';
+    }
+    confirmation += '.';
+    _addBotMessage(confirmation);
+
+    _resetExerciseCreation();
     _closeVoiceChatController.add(null);
     notifyListeners();
   }
 
+  void _handleExerciseCreationStep(String command) {
+    final normalizedCommand = command.toLowerCase();
+    final skipWords = ['пропустить', 'дальше', 'не знаю', 'пропуск'];
+
+    if (skipWords.contains(normalizedCommand)) {
+      switch (_exerciseCreationStep) {
+        case _ExerciseCreationStep.awaitingRepsOrTime:
+          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
+          _addBotMessage('Какой вес?');
+          _voskService.startListening();
+          break;
+        case _ExerciseCreationStep.awaitingWeight:
+          _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
+          _addBotMessage('Какой темп?');
+          _voskService.startListening();
+          break;
+        case _ExerciseCreationStep.awaitingTempo:
+          _finalizeExerciseCreation();
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
+    switch (_exerciseCreationStep) {
+      case _ExerciseCreationStep.awaitingRepsOrTime:
+        final repsWords = ['раз', 'повторений', 'повторения', 'повторов'];
+        final secsWords = ['секунд', 'сек'];
+        String numberPart = normalizedCommand;
+        String? unit;
+
+        for (final word in repsWords) {
+          if (normalizedCommand.contains(word)) {
+            unit = 'reps';
+            numberPart =
+                normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+            break;
+          }
+        }
+
+        if (unit == null) {
+          for (final word in secsWords) {
+            if (normalizedCommand.contains(word)) {
+              unit = 'secs';
+              numberPart =
+                  normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+              break;
+            }
+          }
+        }
+
+        final value = _parseNumberWord(numberPart);
+
+        if (value > 0) {
+          if (unit == 'reps') {
+            _exerciseInProgress!.reps = value;
+            _exerciseInProgress!.isRepsBased = true;
+            _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
+            _addBotMessage('Какой вес?');
+            _voskService.startListening();
+          } else if (unit == 'secs') {
+            _exerciseInProgress!.durationSec = value;
+            _exerciseInProgress!.isRepsBased = false;
+            _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
+            _addBotMessage('Какой вес?');
+            _voskService.startListening();
+          } else {
+            // No unit found, but a number was.
+            _pendingRepsOrTimeValue = value;
+            _exerciseCreationStep =
+                _ExerciseCreationStep.awaitingRepsOrTimeClarification;
+            _addBotMessage('$value повторений или секунд?');
+            _voskService.startListening();
+          }
+        } else {
+          // No valid number found.
+          _addBotMessage('Не поняла. Сколько повторений или секунд?');
+          _voskService.startListening();
+        }
+        break;
+      case _ExerciseCreationStep.awaitingRepsOrTimeClarification:
+        if (normalizedCommand.contains('повторений') ||
+            normalizedCommand.contains('раз')) {
+          _exerciseInProgress!.reps = _pendingRepsOrTimeValue!;
+          _exerciseInProgress!.isRepsBased = true;
+          _pendingRepsOrTimeValue = null;
+          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
+          _addBotMessage('Какой вес?');
+          _voskService.startListening();
+        } else if (normalizedCommand.contains('секунд')) {
+          _exerciseInProgress!.durationSec = _pendingRepsOrTimeValue!;
+          _exerciseInProgress!.isRepsBased = false;
+          _pendingRepsOrTimeValue = null;
+          _exerciseCreationStep = _ExerciseCreationStep.awaitingWeight;
+          _addBotMessage('Какой вес?');
+          _voskService.startListening();
+        } else {
+          _addBotMessage('Пожалуйста, уточните: повторений или секунд?');
+          _voskService.startListening();
+        }
+        break;
+      case _ExerciseCreationStep.awaitingWeight:
+        final weightRegex = RegExp(r'(\d+|(\d+([.,]\d+)?))\s*(килограмм|кг)');
+        final weightMatch = weightRegex.firstMatch(normalizedCommand);
+        if (weightMatch != null) {
+          final weightStr = weightMatch.group(1)!.replaceAll(',', '.');
+          _exerciseInProgress!.loadKg = double.tryParse(weightStr);
+        }
+        _exerciseCreationStep = _ExerciseCreationStep.awaitingTempo;
+        _addBotMessage('Какой темп?');
+        _voskService.startListening();
+        break;
+      case _ExerciseCreationStep.awaitingTempo:
+        _exerciseInProgress!.tempo = command;
+        _finalizeExerciseCreation();
+        break;
+      default:
+        _resetExerciseCreation();
+        break;
+    }
+  }
+
   int _parseNumberWord(String word) {
-    final Map<String, int> numberWords = {
-      'один': 1,
-      'одна': 1,
-      'два': 2,
-      'две': 2,
-      'три': 3,
-      'четыре': 4,
-      'пять': 5,
-      'шесть': 6,
-      'семь': 7,
-      'восемь': 8,
-      'девять': 9,
-      'десять': 10,
+    final numberWords = {
+      'один': 1, 'одна': 1, 'два': 2, 'две': 2, 'три': 3, 'четыре': 4, 'пять': 5,
+      'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
+      'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
+      'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
+      'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
+      'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80,
+      'девяносто': 90,
     };
-    return numberWords[word.toLowerCase()] ?? int.tryParse(word) ?? 0;
+
+    final trimmedText = word.trim().toLowerCase();
+
+    // First, try to parse the whole string as a digit
+    final digit = int.tryParse(trimmedText);
+    if (digit != null) {
+      return digit;
+    }
+
+    // If not a digit, parse as words
+    final words = trimmedText.split(' ');
+    int value = 0;
+
+    for (final word in words) {
+      final numVal = numberWords[word];
+      if (numVal != null) {
+        value += numVal;
+      } else {
+        // If a word is not a number, parsing fails for the whole phrase
+        return 0;
+      }
+    }
+
+    return value;
   }
 
   void updateBlockLabel(Block block, String label) {
@@ -523,6 +659,15 @@ class EditWorkoutNotifier extends ChangeNotifier {
       return false;
     }
   }
+}
+
+enum _ExerciseCreationStep {
+  none,
+  awaitingName,
+  awaitingRepsOrTime,
+  awaitingRepsOrTimeClarification,
+  awaitingWeight,
+  awaitingTempo,
 }
 
 extension on String {
