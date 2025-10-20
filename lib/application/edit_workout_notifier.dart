@@ -38,8 +38,8 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   // --- Chatbot State ---
 
-  List<String> _conversationLog = [];
-  List<String> get conversationLog => _conversationLog;
+  List<(String, bool)> _conversationLog = []; // message, isUser
+  List<(String, bool)> get conversationLog => _conversationLog;
 
   Object? _context;
   Object? get context => _context;
@@ -57,7 +57,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
   Stream<void> get closeVoiceChatStream => _closeVoiceChatController.stream;
 
   void _addBotMessage(String text) {
-    _conversationLog.add("Bot: $text");
+    _conversationLog.add((text, false));
     notifyListeners();
   }
 
@@ -194,7 +194,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
     // Stop listening as soon as we receive a command to process it.
     await _voskService.stopListening();
 
-    _conversationLog.add("You: $command");
+    _conversationLog.add((command, true));
     notifyListeners();
 
     final normalizedCommand = command.toLowerCase();
@@ -534,6 +534,8 @@ class EditWorkoutNotifier extends ChangeNotifier {
       'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
       'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40, 'пятьдесят': 50,
       'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80, 'девяносто': 90,
+      'сто': 100, 'двести': 200, 'триста': 300, 'четыреста': 400, 'пятьсот': 500,
+      'шестьсот': 600, 'семьсот': 700, 'восемьсот': 800, 'девятьсот': 900,
     };
 
     final trimmedText = word.trim().toLowerCase();

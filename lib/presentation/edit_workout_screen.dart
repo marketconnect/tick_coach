@@ -1331,8 +1331,7 @@ class _VoiceChatView extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: notifier.conversationLog.length,
                   itemBuilder: (context, index) {
-                    final message = notifier.conversationLog[index];
-                    final isUserMessage = message.startsWith('You:');
+                    final (message, isUserMessage) = notifier.conversationLog[index];
                     final alignment = isUserMessage
                         ? Alignment.centerRight
                         : Alignment.centerLeft;
