@@ -302,7 +302,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
     }
   }
 
-  void _finalizeExerciseCreation() {
+  void _finalizeExerciseCreation({int? restDuration}) {
     if (_context is! Set || _exerciseInProgress == null) {
       _resetExerciseCreation();
       return;
@@ -310,6 +310,11 @@ class EditWorkoutNotifier extends ChangeNotifier {
     final currentSet = _context as Set;
     _saveStateForUndo();
     currentSet.items.add(_exerciseInProgress!);
+
+    if (restDuration != null && restDuration > 0) {
+      final newRest = Rest(id: _generateId(), durationSec: restDuration);
+      currentSet.items.add(newRest);
+    }
 
     var confirmation = 'Готово, добавила ${_exerciseInProgress!.name}';
     if (_exerciseInProgress!.isRepsBased) {
@@ -324,6 +329,9 @@ class EditWorkoutNotifier extends ChangeNotifier {
         _exerciseInProgress!.tempo!.isNotEmpty) {
       confirmation += ', темп ${_exerciseInProgress!.tempo}';
     }
+    if (restDuration != null && restDuration > 0) {
+      confirmation += ', и отдых $restDuration секунд';
+    }
     confirmation += '.';
     _addBotMessage(confirmation);
 
@@ -334,7 +342,7 @@ class EditWorkoutNotifier extends ChangeNotifier {
 
   void _handleExerciseCreationStep(String command) {
     final normalizedCommand = command.toLowerCase();
-    final skipWords = ['пропустить', 'дальше', 'не знаю', 'пропуск'];
+    final skipWords = ['пропустить', 'дальше', 'не знаю', 'пропуск', 'нет'];
 
     if (skipWords.contains(normalizedCommand)) {
       switch (_exerciseCreationStep) {
@@ -349,7 +357,12 @@ class EditWorkoutNotifier extends ChangeNotifier {
           _voskService.startListening();
           break;
         case _ExerciseCreationStep.awaitingTempo:
-          _finalizeExerciseCreation();
+          _exerciseCreationStep = _ExerciseCreationStep.awaitingRest;
+          _addBotMessage('Сколько секунд отдыха добавить?');
+          _voskService.startListening();
+          break;
+        case _ExerciseCreationStep.awaitingRest:
+          _finalizeExerciseCreation(); // Finalize without rest
           break;
         default:
           break;
@@ -470,7 +483,22 @@ class EditWorkoutNotifier extends ChangeNotifier {
         if (parsedTempo.isNotEmpty) {
           _exerciseInProgress!.tempo = parsedTempo;
         }
-        _finalizeExerciseCreation();
+        _exerciseCreationStep = _ExerciseCreationStep.awaitingRest;
+        _addBotMessage('Сколько секунд отдыха добавить?');
+        _voskService.startListening();
+        break;
+      case _ExerciseCreationStep.awaitingRest:
+        String numberPart = normalizedCommand;
+        final secsWords = ['секунд', 'сек'];
+        for (final word in secsWords) {
+          if (normalizedCommand.contains(word)) {
+            numberPart =
+                normalizedCommand.substring(0, normalizedCommand.indexOf(word)).trim();
+            break;
+          }
+        }
+        final duration = _parseNumberWord(numberPart);
+        _finalizeExerciseCreation(restDuration: duration > 0 ? duration : null);
         break;
       default:
         _resetExerciseCreation();
@@ -710,6 +738,7 @@ enum _ExerciseCreationStep {
   awaitingRepsOrTimeClarification,
   awaitingWeight,
   awaitingTempo,
+  awaitingRest,
 }
 
 extension on String {
