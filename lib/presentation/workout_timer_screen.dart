@@ -72,18 +72,21 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       // Flatten the workout structure into a linear list of steps
       for (final block in session.blocks) {
         for (final set in block.sets) {
-          final exercisesInSet = set.items.whereType<Exercise>().length;
-          int currentExerciseNum = 0;
+          final totalExercisesInSetAcrossRounds =
+              set.items.whereType<Exercise>().length * set.repeat;
+          int exerciseCounterForThisSet = 0;
           for (int i = 0; i < set.repeat; i++) {
             for (final item in set.items) {
-              if (item is Exercise) currentExerciseNum++;
+              if (item is Exercise) {
+                exerciseCounterForThisSet++;
+              }
               _workoutPlan.add(
                 TimerStep(
                   item,
                   i + 1,
                   set.repeat,
-                  currentExerciseNum,
-                  exercisesInSet,
+                  exerciseCounterForThisSet,
+                  totalExercisesInSetAcrossRounds,
                 ),
               );
             }
@@ -92,7 +95,13 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       }
       setState(() {
         final firstStep = _workoutPlan.first.item;
-        _remainingTime = (firstStep is Rest) ? firstStep.durationSec : 0;
+        if (firstStep is Rest) {
+          _remainingTime = firstStep.durationSec;
+        } else if (firstStep is Exercise && !firstStep.isRepsBased) {
+          _remainingTime = firstStep.durationSec;
+        } else {
+          _remainingTime = 0;
+        }
         _isLoading = false;
         // Start paused, waiting for user to press play
       });
@@ -108,8 +117,8 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
   void _startTimer() {
     if (_timer != null && _timer!.isActive) return;
     final currentItem = _workoutPlan[_currentIntervalIndex].item;
-    if (currentItem is Exercise) {
-      // Exercises are reps-based for now
+    if (currentItem is Exercise && currentItem.isRepsBased) {
+      // Do not start timer for rep-based exercises
       return;
     }
     setState(() {
@@ -143,7 +152,13 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       setState(() {
         _currentIntervalIndex++;
         final currentItem = _workoutPlan[_currentIntervalIndex].item;
-        _remainingTime = (currentItem is Rest) ? currentItem.durationSec : 0;
+        if (currentItem is Rest) {
+          _remainingTime = currentItem.durationSec;
+        } else if (currentItem is Exercise && !currentItem.isRepsBased) {
+          _remainingTime = currentItem.durationSec;
+        } else {
+          _remainingTime = 0;
+        }
       });
     } else {
       _timer?.cancel();
@@ -155,7 +170,7 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       return;
     }
     final currentItem = _workoutPlan[_currentIntervalIndex].item;
-    if (currentItem is Exercise) {
+    if (currentItem is Exercise && currentItem.isRepsBased) {
       _pauseTimer();
     } else {
       _startTimer();
@@ -176,10 +191,19 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
       }
 
       final currentItem = _workoutPlan[_currentIntervalIndex].item;
-      _remainingTime = (currentItem is Rest) ? currentItem.durationSec : 0;
+      if (currentItem is Rest) {
+        _remainingTime = currentItem.durationSec;
+      } else if (currentItem is Exercise && !currentItem.isRepsBased) {
+        _remainingTime = currentItem.durationSec;
+      } else {
+        _remainingTime = 0;
+      }
     });
 
-    if (!wasPaused && _workoutPlan[_currentIntervalIndex].item is Rest) {
+    final currentItem = _workoutPlan[_currentIntervalIndex].item;
+    if (!wasPaused &&
+        (currentItem is Rest ||
+            (currentItem is Exercise && !currentItem.isRepsBased))) {
       _startTimer();
     }
   }
@@ -273,14 +297,15 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                         else
                           const SizedBox(width: 48), // Keep space consistent
                         // Text
-                        Semantics(
-                          label:
-                              'Упражнение ${currentStep.currentExerciseInSet} из ${currentStep.totalExercisesInSet}',
-                          child: Text(
-                            '${currentStep.currentExerciseInSet} / ${currentStep.totalExercisesInSet}',
-                            style: Theme.of(context).textTheme.headlineSmall,
+                        if (currentItem is Exercise)
+                          Semantics(
+                            label:
+                                'Упражнение ${currentStep.currentExerciseInSet} из ${currentStep.totalExercisesInSet}',
+                            child: Text(
+                              '${currentStep.currentExerciseInSet} / ${currentStep.totalExercisesInSet}',
+                              style: Theme.of(context).textTheme.headlineSmall,
+                            ),
                           ),
-                        ),
 
                         // Forward arrow
                         if (_currentIntervalIndex < _workoutPlan.length - 1)
@@ -310,15 +335,17 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                       ),
                     const SizedBox(height: 8),
 
-                    if (currentItem is Exercise)
+                    if (currentItem is Exercise && currentItem.isRepsBased)
                       Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
-                              '10', // Placeholder for reps
-                              style: Theme.of(context).textTheme.displayLarge
+                              '${currentItem.reps}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .displayLarge
                                   ?.copyWith(
                                     fontSize: 100,
                                     fontWeight: FontWeight.bold,
@@ -328,16 +355,17 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                           const Text('повторений'),
                         ],
                       )
-                    else
+                    else // Timed exercise or Rest
                       Column(
-                        // Rest
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
                               _formatDuration(_remainingTime),
-                              style: Theme.of(context).textTheme.displayLarge
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .displayLarge
                                   ?.copyWith(
                                     fontSize: 100,
                                     fontWeight: FontWeight.bold,
@@ -350,7 +378,9 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                     const SizedBox(height: 16),
 
                     // Add padding at the bottom so the FAB doesn't overlap content
-                    if (currentItem is Rest) const SizedBox(height: 120),
+                    if (currentItem is Rest ||
+                        (currentItem is Exercise && !currentItem.isRepsBased))
+                      const SizedBox(height: 120),
                   ],
                 ),
               ),
@@ -359,15 +389,16 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
         },
       ),
 
-      floatingActionButton: currentItem is Exercise
-          ? null
-          : FloatingActionButton.large(
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                _isPaused ? _startTimer() : _pauseTimer();
-              },
-              child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-            ),
+      floatingActionButton:
+          (currentItem is Exercise && currentItem.isRepsBased)
+              ? null
+              : FloatingActionButton.large(
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    _isPaused ? _startTimer() : _pauseTimer();
+                  },
+                  child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+                ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }

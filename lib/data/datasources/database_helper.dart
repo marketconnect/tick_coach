@@ -162,9 +162,14 @@ class DatabaseHelper {
                 'equipment': item.equipment,
                 'load_kg': item.loadKg,
                 'tempo': item.tempo,
-                'repetitions_json': jsonEncode(
-                  item.repetitions.map((r) => r.toJson()).toList(),
-                ),
+                'repetitions_json': jsonEncode({
+                  'is_reps_based': item.isRepsBased,
+                  'reps': item.reps,
+                  'duration_sec': item.durationSec,
+                  'repetitions': item.repetitions
+                      .map((r) => r.toJson())
+                      .toList(),
+                }),
                 'holds_json': jsonEncode(
                   item.holds.map((h) => h.toJson()).toList(),
                 ),
@@ -232,6 +237,27 @@ class DatabaseHelper {
         for (final itemMap in itemMaps) {
           final type = itemMap['type'] as String;
           if (type == 'exercise') {
+            final repetitionsJson =
+                itemMap['repetitions_json'] as String? ?? '[]';
+            final decodedRepetitions = jsonDecode(repetitionsJson);
+            List<Repetition> repetitions;
+            bool isRepsBased = true;
+            int reps = 10;
+            int durationSec = 30;
+            if (decodedRepetitions is Map) {
+              isRepsBased = decodedRepetitions['is_reps_based'] ?? true;
+              reps = decodedRepetitions['reps'] ?? 10;
+              durationSec = decodedRepetitions['duration_sec'] ?? 30;
+              repetitions = (decodedRepetitions['repetitions'] as List? ?? [])
+                  .map((r) => Repetition(index: r['index']))
+                  .toList();
+            } else if (decodedRepetitions is List) {
+              repetitions = decodedRepetitions
+                  .map((r) => Repetition(index: r['index']))
+                  .toList();
+            } else {
+              repetitions = [];
+            }
             set.items.add(
               Exercise(
                 id: itemMap['id'] as String,
@@ -240,10 +266,10 @@ class DatabaseHelper {
                 equipment: itemMap['equipment'] as String?,
                 loadKg: itemMap['load_kg'] as double?,
                 tempo: itemMap['tempo'] as String?,
-                repetitions:
-                    (jsonDecode(itemMap['repetitions_json'] as String) as List)
-                        .map((r) => Repetition(index: r['index']))
-                        .toList(),
+                repetitions: repetitions,
+                isRepsBased: isRepsBased,
+                reps: reps,
+                durationSec: durationSec,
                 holds: (jsonDecode(itemMap['holds_json'] as String) as List)
                     .map((h) => Hold(durationSec: h['duration_sec']))
                     .toList(),
