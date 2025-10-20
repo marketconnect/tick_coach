@@ -217,20 +217,47 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     final repo = Provider.of<WorkoutRepository>(context, listen: false);
     final List<Block> sequenceBlocks = [];
 
+    String generateId() =>
+        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
     for (final session in _selectedSessions) {
+      // Rounds workouts are not suitable for sequences in this way.
+      if (session.workoutType == 'rounds') {
+        continue;
+      }
       final fullSession = await repo.getTrainingSession(session.id);
       if (fullSession != null) {
-        // Just add all blocks from the selected session
-        sequenceBlocks.addAll(fullSession.blocks);
+        // Deep copy blocks and their children with new IDs to avoid DB conflicts.
+        final copiedBlocks = fullSession.blocks.map((block) {
+          return block.copyWith(
+            id: generateId(),
+            sets: block.sets.map((set) {
+              return set.copyWith(
+                id: generateId(),
+                items: set.items.map((item) {
+                  return item.copyWith(id: generateId());
+                }).toList(),
+              );
+            }).toList(),
+          );
+        }).toList();
+        sequenceBlocks.addAll(copiedBlocks);
       }
     }
-
-    // This logic might need refinement. For now, just combining blocks.
-    // A better approach might be to create a new block for each combined workout.
-    final newSessionId =
-        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+    if (sequenceBlocks.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Выберите хотя бы одну обычную тренировку (не раунды).',
+            ),
+          ),
+        );
+      }
+      _cancelSelection();
+      return;
+    }
     final newSession = TrainingSession(
-      id: newSessionId,
+      id: generateId(),
       name: 'Новая последовательность',
       blocks: sequenceBlocks,
     );
@@ -258,13 +285,25 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
     if (_sessions.isEmpty) {
       return const Center(child: Text('Пока нет тренировок'));
     }
+    final displaySessions = _isSelectionMode
+        ? _sessions.where((s) => s.workoutType != 'rounds').toList()
+        : _sessions;
+    if (displaySessions.isEmpty) {
+      return Center(
+        child: Text(
+          _isSelectionMode
+              ? 'Нет тренировок для добавления в последовательность'
+              : 'Пока нет тренировок',
+        ),
+      );
+    }
     return RefreshIndicator(
       onRefresh: _fetchWorkouts,
       child: ListView.separated(
         padding: const EdgeInsets.all(8.0),
-        itemCount: _sessions.length,
+        itemCount: displaySessions.length,
         itemBuilder: (context, index) {
-          final session = _sessions[index];
+          final session = displaySessions[index];
           return TrainingSessionCard(
             key: ValueKey(session.id),
             session: session,
@@ -420,8 +459,8 @@ class TrainingSessionCard extends StatelessWidget {
                                 );
                                 final messenger = ScaffoldMessenger.of(context);
                                 try {
-                                  final originalSession =
-                                      await repo.getTrainingSession(session.id);
+                                  final originalSession = await repo
+                                      .getTrainingSession(session.id);
                                   if (originalSession == null) {
                                     messenger.showSnackBar(
                                       const SnackBar(
@@ -454,13 +493,22 @@ class TrainingSessionCard extends StatelessWidget {
                                     }).toList(),
                                   );
                                   await repo.saveTrainingSession(newSession);
-                                  messenger.showSnackBar(SnackBar(
-                                    content: Text(
-                                        'Тренировка "${session.name}" скопирована'),
-                                  ));
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Тренировка "${session.name}" скопирована',
+                                      ),
+                                    ),
+                                  );
                                   onWorkoutUpdated();
                                 } catch (e) {
-                                  messenger.showSnackBar(const SnackBar(content: Text('Ошибка при копировании тренировки')));
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Ошибка при копировании тренировки',
+                                      ),
+                                    ),
+                                  );
                                 }
                                 break;
                               case 'delete':

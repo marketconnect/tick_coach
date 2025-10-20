@@ -1,0 +1,35 @@
+diff --git a/lib/presentation/workouts_screen.dart b/lib/presentation/workouts_screen.dart
+index 597116c..0492857 100644
+--- a/lib/presentation/workouts_screen.dart
++++ b/lib/presentation/workouts_screen.dart
+@@ -313,13 +313,28 @@
+     if (_sessions.isEmpty) {
+       return const Center(child: Text('Пока нет тренировок'));
+     }
++
++    final displaySessions = _isSelectionMode
++        ? _sessions.where((s) => s.workoutType != 'rounds').toList()
++        : _sessions;
++
++    if (displaySessions.isEmpty) {
++      return Center(
++        child: Text(
++          _isSelectionMode
++              ? 'Нет тренировок для добавления в последовательность'
++              : 'Пока нет тренировок',
++        ),
++      );
++    }
++
+     return RefreshIndicator(
+       onRefresh: _fetchWorkouts,
+       child: ListView.separated(
+         padding: const EdgeInsets.all(8.0),
+-        itemCount: _sessions.length,
++        itemCount: displaySessions.length,
+         itemBuilder: (context, index) {
+-          final session = _sessions[index];
++          final session = displaySessions[index];
+           return TrainingSessionCard(
+             key: ValueKey(session.id),
+             session: session,
