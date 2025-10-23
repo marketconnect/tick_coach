@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -6,6 +7,7 @@ enum ConnectionStatus { connecting, connected, disconnected, error }
 
 class WebSocketService {
   final String url;
+  final String clientId;
   WebSocketChannel? _channel;
   final StreamController<String> _messageController =
       StreamController.broadcast();
@@ -18,7 +20,7 @@ class WebSocketService {
   Stream<String> get messages => _messageController.stream;
   Stream<ConnectionStatus> get status => _statusController.stream;
 
-  WebSocketService(this.url);
+  WebSocketService(this.url, this.clientId);
 
   Future<void> connect() async {
     if (_isConnecting || (_channel != null && _channel?.closeCode == null)) {
@@ -34,7 +36,11 @@ class WebSocketService {
       _sendPendingMessages();
       _channel?.stream.listen(
         (message) {
-          _messageController.add(message);
+          if (message is String) {
+            _messageController.add(message);
+          } else if (message is List<int>) {
+            _messageController.add(utf8.decode(message));
+          }
         },
         onDone: () {
           _statusController.add(ConnectionStatus.disconnected);
@@ -62,18 +68,23 @@ class WebSocketService {
 
   void _sendPendingMessages() {
     if (_channel != null && _channel?.closeCode == null) {
-      for (final message in _pendingMessages) {
-        _channel?.sink.add(message);
+      for (final jsonMessage in _pendingMessages) {
+        _channel?.sink.add(jsonMessage);
       }
       _pendingMessages.clear();
     }
   }
 
   void sendMessage(String message) {
+    final jsonPayload = jsonEncode({
+      'clientId': clientId,
+      'message': message,
+    });
+
     if (_channel != null && _channel?.closeCode == null) {
-      _channel?.sink.add(message);
+      _channel?.sink.add(jsonPayload);
     } else {
-      _pendingMessages.add(message);
+      _pendingMessages.add(jsonPayload);
       connect();
     }
   }

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:tick_coach/application/agent_entry_notifier.dart';
 import 'package:tick_coach/data/services/websocket_service.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
-import 'package:tick_coach/domain/repositories/chat_repository.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,7 +28,6 @@ class AgentEntryView extends StatefulWidget {
 class _AgentEntryViewState extends State<AgentEntryView> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
-  bool _didInitiateConnection = false;
 
   @override
   void dispose() {
@@ -77,6 +75,8 @@ class _AgentEntryViewState extends State<AgentEntryView> {
                     return _WorkoutMessageBubble(
                       trainingSession: message.trainingSession!,
                     );
+                  case MessageType.error:
+                    return _ErrorMessageBubble(message: message);
                 }
               },
             ),
@@ -94,12 +94,6 @@ class _AgentEntryViewState extends State<AgentEntryView> {
         Expanded(
           child: TextField(
             controller: _textController,
-            onChanged: (text) {
-              if (text.isNotEmpty && !_didInitiateConnection) {
-                notifier.initiateConnection();
-                _didInitiateConnection = true;
-              }
-            },
             decoration: const InputDecoration(
               labelText: 'I want…',
               prefixIcon: Icon(Icons.auto_awesome),
@@ -241,6 +235,44 @@ class _WorkoutMessageBubble extends StatelessWidget {
   }
 }
 
+class _ErrorMessageBubble extends StatelessWidget {
+  final ChatMessage message;
+  const _ErrorMessageBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Card(
+        color: theme.colorScheme.errorContainer,
+        elevation: 1,
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.error_outline,
+                color: theme.colorScheme.onErrorContainer,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: SelectableText(
+                  message.text!,
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TypingIndicator extends StatefulWidget {
   const _TypingIndicator();
 
@@ -284,9 +316,9 @@ class _TypingIndicatorState extends State<_TypingIndicator>
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: List.generate(3, (index) {
-                  final bounce =
-                      sin((_controller.value * 2 * pi) + (index * pi * 0.5))
-                          .abs();
+                  final bounce = sin(
+                    (_controller.value * 2 * pi) + (index * pi * 0.5),
+                  ).abs();
                   return Transform.translate(
                     offset: Offset(0, -bounce * 6), // Bounce height
                     child: Container(
@@ -295,8 +327,9 @@ class _TypingIndicatorState extends State<_TypingIndicator>
                       margin: const EdgeInsets.symmetric(horizontal: 3),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color:
-                            theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                        color: theme.colorScheme.onSurfaceVariant.withOpacity(
+                          0.8,
+                        ),
                       ),
                     ),
                   );

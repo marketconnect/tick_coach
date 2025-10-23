@@ -417,10 +417,31 @@ class _WorkoutTimerScreenState extends State<WorkoutTimerScreen> {
                     ),
                     const SizedBox(height: 16),
                     if (currentItem is Exercise)
-                      Text(
-                        currentItem.name,
-                        style: Theme.of(context).textTheme.headlineMedium,
-                        textAlign: TextAlign.center,
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            currentItem.name,
+                            style: Theme.of(context).textTheme.headlineMedium,
+                            textAlign: TextAlign.center,
+                          ),
+                          if ((currentItem.loadKg != null && currentItem.loadKg! > 0) ||
+                              (currentItem.tempo?.isNotEmpty ?? false))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8.0),
+                              child: Text(
+                                [
+                                  if (currentItem.loadKg != null &&
+                                      currentItem.loadKg! > 0)
+                                    'Вес: ${currentItem.loadKg} кг',
+                                  if (currentItem.tempo?.isNotEmpty ?? false)
+                                    'Темп: ${currentItem.tempo}',
+                                ].join(' | '),
+                                style: Theme.of(context).textTheme.titleMedium,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                        ],
                       ),
                     if (currentItem is Rest)
                       Text(

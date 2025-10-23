@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:tick_coach/data/services/websocket_service.dart';
 
@@ -13,6 +14,7 @@ class AgentEntryNotifier extends ChangeNotifier {
 
   AgentEntryNotifier(this._chatRepository) {
     _loadHistory();
+    initiateConnection();
   }
 
   List<ChatMessage> _messages = [];
@@ -21,12 +23,11 @@ class AgentEntryNotifier extends ChangeNotifier {
   bool _isWaitingForResponse = false;
   bool get isWaitingForResponse => _isWaitingForResponse;
 
-  ConnectionStatus _connectionStatus = ConnectionStatus.connecting;
+  ConnectionStatus _connectionStatus = ConnectionStatus.disconnected;
   ConnectionStatus get connectionStatus => _connectionStatus;
 
   StreamSubscription? _messageSubscription;
   StreamSubscription? _statusSubscription;
-  bool _connectionAttempted = false;
 
   Future<void> _loadHistory() async {
     final history = await _chatRepository.getChatHistory();
@@ -34,11 +35,10 @@ class AgentEntryNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _connect() {
-    if (_connectionAttempted) {
-      return;
-    }
-    _connectionAttempted = true;
+  void _subscribeToStreams() {
+    // Подписываемся на стримы только один раз
+    if (_statusSubscription != null) return;
+
     _statusSubscription = _chatRepository.status.listen((status) {
       _connectionStatus = status;
       notifyListeners();
@@ -47,31 +47,70 @@ class AgentEntryNotifier extends ChangeNotifier {
     _messageSubscription = _chatRepository.messages.listen((data) {
       _handleAssistantMessage(data);
     });
-
-    _chatRepository.connect();
   }
 
   void initiateConnection() {
-    _connect();
+    _subscribeToStreams();
+    _chatRepository.connect();
   }
 
   void _handleAssistantMessage(String data) {
     ChatMessage assistantMessage;
     try {
-      final xmlDocument = XmlDocument.parse(data);
-      final trainingSessionElement = xmlDocument.getElement('TrainingSession');
-      if (trainingSessionElement != null) {
-        assistantMessage = ChatMessage(
-          id: _generateId(),
-          sender: MessageSender.assistant,
-          timestamp: DateTime.now(),
-          type: MessageType.workout,
-          trainingSession: _parseTrainingSession(trainingSessionElement),
-        );
+      // Always try to parse as JSON first
+      final decodedJson = jsonDecode(data);
+      final type = decodedJson['type'];
+      final payload = decodedJson['payload'];
+
+      if (type is String && payload != null) {
+        switch (type) {
+          case 'error':
+            assistantMessage = ChatMessage(
+              id: _generateId(),
+              sender: MessageSender.assistant,
+              timestamp: DateTime.now(),
+              type: MessageType.error,
+              text: payload.toString(),
+            );
+            break;
+          case 'final_answer':
+            assistantMessage = _createTextMessage(payload.toString());
+            break;
+          case 'training_session':
+            try {
+              final xmlDocument = XmlDocument.parse(payload.toString());
+              final trainingSessionElement = xmlDocument.getElement(
+                'TrainingSession',
+              );
+              if (trainingSessionElement != null) {
+                assistantMessage = ChatMessage(
+                  id: _generateId(),
+                  sender: MessageSender.assistant,
+                  timestamp: DateTime.now(),
+                  type: MessageType.workout,
+                  trainingSession: _parseTrainingSession(
+                    trainingSessionElement,
+                  ),
+                );
+              } else {
+                // Invalid XML in payload, treat as text
+                assistantMessage = _createTextMessage(data);
+              }
+            } catch (e) {
+              // XML parsing failed, treat as text
+              assistantMessage = _createTextMessage(data);
+            }
+            break;
+          default:
+            // Unknown type, treat original data as text
+            assistantMessage = _createTextMessage(data);
+        }
       } else {
+        // JSON doesn't have the required structure, treat as text
         assistantMessage = _createTextMessage(data);
       }
     } catch (e) {
+      // Not a valid JSON, treat as plain text.
       assistantMessage = _createTextMessage(data);
     }
 
@@ -149,18 +188,20 @@ class AgentEntryNotifier extends ChangeNotifier {
 
   void sendMessage(String text) {
     if (text.trim().isEmpty || _isWaitingForResponse) return;
-    initiateConnection();
+
     final userMessage = ChatMessage(
       id: _generateId(),
       text: text,
       sender: MessageSender.user,
       timestamp: DateTime.now(),
     );
-    _chatRepository.saveChatMessage(userMessage);
-    _chatRepository.sendMessage(text);
+
     _messages.add(userMessage);
     _isWaitingForResponse = true;
     notifyListeners();
+
+    _chatRepository.saveChatMessage(userMessage);
+    _chatRepository.sendMessage(text);
   }
 
   Future<void> clearOldMessages() async {

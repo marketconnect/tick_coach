@@ -2,7 +2,7 @@ import 'package:tick_coach/domain/models/training_session.dart';
 
 enum MessageSender { user, assistant }
 
-enum MessageType { text, workout }
+enum MessageType { text, workout, error }
 
 class ChatMessage {
   final String id;
@@ -22,7 +22,8 @@ class ChatMessage {
     this.trainingSession,
   }) : assert(
          (type == MessageType.text && text != null) ||
-             (type == MessageType.workout && trainingSession != null),
+             (type == MessageType.workout && trainingSession != null) ||
+             (type == MessageType.error && text != null),
          'Для текстовых сообщений должен быть текст, а для тренировок - trainingSession.',
        );
 

@@ -1,4 +1,6 @@
 import 'package:dynamic_color/dynamic_color.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 import 'package:tick_coach/application/agent_entry_notifier.dart';
 import 'package:tick_coach/conf.dart';
@@ -13,12 +15,22 @@ import 'package:tick_coach/domain/repositories/workout_repository.dart';
 import 'package:flutter/material.dart';
 import 'presentation/workouts_screen.dart';
 
-void main() => runApp(const AppWrapper());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  String? clientId = prefs.getString('client_id');
+  if (clientId == null) {
+    clientId = const Uuid().v4();
+    await prefs.setString('client_id', clientId);
+  }
+  runApp(AppWrapper(clientId: clientId));
+}
 
 const _seed = Color(0xFF6750A4); // fixed seed, no placeholders
 
 class AppWrapper extends StatelessWidget {
-  const AppWrapper({super.key});
+  final String clientId;
+  const AppWrapper({super.key, required this.clientId});
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +38,7 @@ class AppWrapper extends StatelessWidget {
       providers: [
         Provider<DatabaseHelper>(create: (_) => DatabaseHelper.instance),
         Provider<WebSocketService>(
-          create: (_) => WebSocketService(Conf.baseUrl),
+          create: (_) => WebSocketService(Conf.baseUrl, clientId),
           dispose: (_, service) => service.dispose(),
         ),
         Provider<VoskService>(
