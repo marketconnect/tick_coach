@@ -1,5 +1,4 @@
-import 'package:tick_coach/domain/models/interval.dart';
-import 'package:tick_coach/domain/models/workout.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
 
 enum MessageSender { user, assistant }
 
@@ -12,8 +11,7 @@ class ChatMessage {
   final MessageType type;
 
   final String? text;
-  final Workout? workout;
-  final List<Interval>? intervals;
+  final TrainingSession? trainingSession;
 
   ChatMessage({
     required this.id,
@@ -21,14 +19,11 @@ class ChatMessage {
     required this.timestamp,
     this.type = MessageType.text,
     this.text,
-    this.workout,
-    this.intervals,
+    this.trainingSession,
   }) : assert(
          (type == MessageType.text && text != null) ||
-             (type == MessageType.workout &&
-                 workout != null &&
-                 intervals != null),
-         'Для текстовых сообщений должен быть текст, а для тренировок - workout и intervals.',
+             (type == MessageType.workout && trainingSession != null),
+         'Для текстовых сообщений должен быть текст, а для тренировок - trainingSession.',
        );
 
   // Для простоты в БД будем сохранять только текстовые сообщения

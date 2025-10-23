@@ -1,180 +1,49 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
-import 'package:flutter/material.dart' hide Interval;
-import 'package:flutter/services.dart';
-import 'package:tick_coach/conf.dart';
-import 'package:tick_coach/domain/models/chat_message.dart';
-import 'package:tick_coach/domain/models/interval.dart';
-import 'package:tick_coach/domain/models/workout.dart';
-import 'package:tick_coach/presentation/edit_workout_screen.dart';
-import 'package:tick_coach/utils/database_helper.dart';
-import 'package:tick_coach/utils/websocket_service.dart';
+import 'package:provider/provider.dart';
+import 'package:tick_coach/application/agent_entry_notifier.dart';
+import 'package:tick_coach/data/services/websocket_service.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
+import 'package:tick_coach/domain/repositories/chat_repository.dart';
 
-class AgentEntry extends StatefulWidget {
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:tick_coach/domain/models/chat_message.dart';
+import 'package:tick_coach/presentation/edit_workout_screen.dart';
+
+class AgentEntry extends StatelessWidget {
   const AgentEntry({super.key});
+
   @override
-  State<AgentEntry> createState() => _AgentEntryState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (context) => AgentEntryNotifier(context.read<ChatRepository>()),
+      child: const AgentEntryView(),
+    );
+  }
 }
 
-class _AgentEntryState extends State<AgentEntry> {
-  final _textController = TextEditingController();
-  final _scrollController = ScrollController();
-  final List<ChatMessage> _messages = [];
-  late final WebSocketService _webSocketService;
-  StreamSubscription? _messageSubscription;
-  StreamSubscription? _statusSubscription;
-
-  bool _isWaitingForResponse = false;
-  ConnectionStatus _connectionStatus = ConnectionStatus.connecting;
+class AgentEntryView extends StatefulWidget {
+  const AgentEntryView({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    _webSocketService = WebSocketService(Conf.baseUrl);
-    _loadHistoryAndConnect();
-  }
+  State<AgentEntryView> createState() => _AgentEntryViewState();
+}
 
-  Future<void> _loadHistoryAndConnect() async {
-    final history = await DatabaseHelper.instance.getChatMessages();
-    setState(() {
-      _messages.addAll(history);
-    });
-    _connect();
-  }
-
-  void _connect() {
-    _statusSubscription = _webSocketService.status.listen((status) {
-      if (!mounted) return;
-      setState(() {
-        _connectionStatus = status;
-      });
-      if (status == ConnectionStatus.error) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ошибка соединения. Попытка переподключения...'),
-          ),
-        );
-      }
-    });
-
-    _messageSubscription = _webSocketService.messages.listen((data) {
-      if (!mounted) return;
-
-      ChatMessage assistantMessage;
-
-      try {
-        // Пытаемся распарсить JSON
-        final decoded = jsonDecode(data);
-
-        // Проверяем, что это объект и тип 'workout'
-        if (decoded is Map<String, dynamic> && decoded['type'] == 'workout') {
-          final workoutData = decoded['workout'];
-          final List<Interval> intervals = (workoutData['intervals'] as List)
-              .map((i) {
-                return Interval(
-                  id: _generateId(), // Генерируем новый ID
-                  kind: IntervalKind.values.byName(i['kind']),
-                  title: i['title'],
-                  description: i['description'],
-                  durationSec: i['durationSec'] ?? 0,
-                  reps: i['reps'] ?? 10,
-                  isRepsBased: i['isRepsBased'] ?? false,
-                );
-              })
-              .toList();
-
-          final workout = Workout(
-            id: _generateId(), // Генерируем новый ID
-            title: workoutData['title'],
-            repeats: workoutData['set_count'],
-            previewLines: [],
-            totalTime: Duration.zero,
-            intervalsCount: 0,
-          );
-
-          assistantMessage = ChatMessage(
-            id: _generateId(),
-            sender: MessageSender.assistant,
-            timestamp: DateTime.now(),
-            type: MessageType.workout,
-            workout: workout,
-            intervals: intervals,
-          );
-        } else {
-          // Если это не JSON тренировки, считаем текстом
-          assistantMessage = ChatMessage(
-            id: _generateId(),
-            text: data,
-            sender: MessageSender.assistant,
-            timestamp: DateTime.now(),
-          );
-        }
-      } catch (e) {
-        // Если парсинг не удался, считаем сообщение обычным текстом
-        assistantMessage = ChatMessage(
-          id: _generateId(),
-          text: data,
-          sender: MessageSender.assistant,
-          timestamp: DateTime.now(),
-        );
-      }
-
-      // Сохраняем в историю только текстовые сообщения
-      if (assistantMessage.type == MessageType.text) {
-        DatabaseHelper.instance.saveChatMessage(assistantMessage);
-      }
-
-      setState(() {
-        _isWaitingForResponse = false;
-        _messages.add(assistantMessage);
-      });
-      _scrollToBottom();
-    });
-
-    _webSocketService.connect();
-  }
+class _AgentEntryViewState extends State<AgentEntryView> {
+  final _textController = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
-    _messageSubscription?.cancel();
-    _statusSubscription?.cancel();
-    _webSocketService.dispose();
     super.dispose();
   }
 
-  String _generateId() {
-    return '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
-  }
+  @override
+  Widget build(BuildContext context) {
+    final notifier = context.watch<AgentEntryNotifier>();
 
-  void _sendMessage() {
-    final text = _textController.text.trim();
-    if (text.isEmpty || _isWaitingForResponse) return;
-
-    HapticFeedback.selectionClick();
-
-    final userMessage = ChatMessage(
-      id: _generateId(),
-      text: text,
-      sender: MessageSender.user,
-      timestamp: DateTime.now(),
-    );
-
-    DatabaseHelper.instance.saveChatMessage(userMessage);
-    _webSocketService.sendMessage(text);
-
-    setState(() {
-      _messages.add(userMessage);
-      _isWaitingForResponse = true;
-    });
-
-    _textController.clear();
-    _scrollToBottom();
-  }
-
-  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -184,51 +53,83 @@ class _AgentEntryState extends State<AgentEntry> {
         );
       }
     });
-  }
 
-  @override
-  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         children: [
-          _buildStatusIndicator(),
+          _buildStatusIndicator(notifier.connectionStatus),
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
-              itemCount: _messages.length + (_isWaitingForResponse ? 1 : 0),
+              itemCount:
+                  notifier.messages.length +
+                  (notifier.isWaitingForResponse ? 1 : 0),
               itemBuilder: (context, index) {
-                if (_isWaitingForResponse && index == _messages.length) {
+                if (notifier.isWaitingForResponse &&
+                    index == notifier.messages.length) {
                   return const _TypingIndicator();
                 }
-                final message = _messages[index];
+                final message = notifier.messages[index];
                 // В зависимости от типа сообщения показываем разный виджет
                 switch (message.type) {
                   case MessageType.text:
                     return _TextMessageBubble(message: message);
                   case MessageType.workout:
                     return _WorkoutMessageBubble(
-                      workout: message.workout!,
-                      intervals: message.intervals!,
+                      trainingSession: message.trainingSession!,
                     );
                 }
               },
             ),
           ),
           const SizedBox(height: 8),
-          _buildMessageInput(),
+          _buildMessageInput(notifier),
         ],
       ),
     );
   }
 
-  Widget _buildStatusIndicator() {
-    if (_connectionStatus == ConnectionStatus.connected) {
+  Widget _buildMessageInput(AgentEntryNotifier notifier) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _textController,
+            decoration: const InputDecoration(
+              labelText: 'I want…',
+              prefixIcon: Icon(Icons.auto_awesome),
+            ),
+            onSubmitted: (_) => _sendMessage(notifier),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filled(
+          onPressed: notifier.isWaitingForResponse
+              ? null
+              : () => _sendMessage(notifier),
+          icon: const Icon(Icons.send),
+          tooltip: 'Отправить',
+        ),
+      ],
+    );
+  }
+
+  void _sendMessage(AgentEntryNotifier notifier) {
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    HapticFeedback.selectionClick();
+    notifier.sendMessage(text);
+    _textController.clear();
+  }
+
+  Widget _buildStatusIndicator(ConnectionStatus status) {
+    if (status == ConnectionStatus.connected) {
       return const SizedBox.shrink();
     }
     String text;
     Color color;
-    switch (_connectionStatus) {
+    switch (status) {
       case ConnectionStatus.connecting:
         text = 'Подключение...';
         color = Colors.orange;
@@ -252,29 +153,6 @@ class _AgentEntryState extends State<AgentEntry> {
         textAlign: TextAlign.center,
         style: TextStyle(color: color),
       ),
-    );
-  }
-
-  Widget _buildMessageInput() {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _textController,
-            decoration: const InputDecoration(
-              labelText: 'I want…',
-              prefixIcon: Icon(Icons.auto_awesome),
-            ),
-            onSubmitted: (_) => _sendMessage(),
-          ),
-        ),
-        const SizedBox(width: 8),
-        IconButton.filled(
-          onPressed: _isWaitingForResponse ? null : _sendMessage,
-          icon: const Icon(Icons.send),
-          tooltip: 'Отправить',
-        ),
-      ],
     );
   }
 }
@@ -312,10 +190,8 @@ class _TextMessageBubble extends StatelessWidget {
 
 // Новый виджет для отображения тренировки
 class _WorkoutMessageBubble extends StatelessWidget {
-  final Workout workout;
-  final List<Interval> intervals;
-
-  const _WorkoutMessageBubble({required this.workout, required this.intervals});
+  final TrainingSession trainingSession;
+  const _WorkoutMessageBubble({required this.trainingSession});
 
   @override
   Widget build(BuildContext context) {
@@ -333,10 +209,10 @@ class _WorkoutMessageBubble extends StatelessWidget {
             children: [
               Text('Готовая тренировка:', style: theme.textTheme.labelMedium),
               const SizedBox(height: 4),
-              Text(workout.title, style: theme.textTheme.titleLarge),
+              Text(trainingSession.name, style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('Сеты: ${workout.repeats ?? 1}'),
-              Text('Упражнений в сете: ${intervals.length}'),
+              Text('Блоков: ${trainingSession.blocks.length}'),
+              // Could add more details here
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
@@ -346,10 +222,8 @@ class _WorkoutMessageBubble extends StatelessWidget {
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (context) => EditWorkoutScreen(
-                          workout: workout,
-                          initialIntervals: intervals,
-                        ),
+                        builder: (context) =>
+                            EditWorkoutScreen(trainingSession: trainingSession),
                       ),
                     );
                   },
@@ -363,19 +237,69 @@ class _WorkoutMessageBubble extends StatelessWidget {
   }
 }
 
-class _TypingIndicator extends StatelessWidget {
+class _TypingIndicator extends StatefulWidget {
   const _TypingIndicator();
 
   @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Align(
+    final theme = Theme.of(context);
+    return Align(
       alignment: Alignment.centerLeft,
       child: Card(
+        color: theme.colorScheme.surfaceContainerHighest,
         elevation: 1,
-        margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         child: Padding(
-          padding: EdgeInsets.all(12.0),
-          child: Text('ассистент печатает...'), // Simple text for now
+          padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(3, (index) {
+                  final bounce =
+                      sin((_controller.value * 2 * pi) + (index * pi * 0.5))
+                          .abs();
+                  return Transform.translate(
+                    offset: Offset(0, -bounce * 6), // Bounce height
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color:
+                            theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                      ),
+                    ),
+                  );
+                }),
+              );
+            },
+          ),
         ),
       ),
     );

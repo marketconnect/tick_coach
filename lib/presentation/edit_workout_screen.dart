@@ -1,58 +1,67 @@
-import 'package:flutter/material.dart' hide Interval;
-import 'package:tick_coach/domain/models/interval.dart' show IntervalKind;
-
-import 'package:tick_coach/domain/models/interval.dart' show Interval;
-import 'package:tick_coach/domain/models/workout.dart';
-
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../utils/database_helper.dart';
+import 'package:tick_coach/domain/models/training_session.dart';
+import 'dart:async';
+import 'package:provider/provider.dart';
+import 'package:tick_coach/application/edit_workout_notifier.dart';
+import 'package:tick_coach/data/services/vosk_service.dart';
+import 'package:tick_coach/domain/repositories/workout_repository.dart';
+
 import 'dart:io';
-import 'package:image_picker/image_picker.dart';
+
 import 'dart:math';
-import 'package:flutter/gestures.dart';
 
-class EditWorkoutScreen extends StatefulWidget {
-  final Workout workout;
-  final List<Interval>? initialIntervals;
-
-  const EditWorkoutScreen({
-    super.key,
-    required this.workout,
-    this.initialIntervals,
-  });
-
+class EditWorkoutScreen extends StatelessWidget {
+  final TrainingSession trainingSession;
+  const EditWorkoutScreen({super.key, required this.trainingSession});
   @override
-  State<EditWorkoutScreen> createState() => _EditWorkoutScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (context) => EditWorkoutNotifier(
+        context.read<WorkoutRepository>(),
+        context.read<VoskService>(),
+        trainingSession,
+      ),
+      child: const _EditWorkoutScreenView(),
+    );
+  }
 }
 
-class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
-  bool _isLoading = true;
-  String? _errorMessage;
-  List<Interval> _intervals = [];
-  int _setCount = 1;
+class _EditWorkoutScreenView extends StatefulWidget {
+  const _EditWorkoutScreenView();
+
+  @override
+  State<_EditWorkoutScreenView> createState() => _EditWorkoutScreenViewState();
+}
+
+class _EditWorkoutScreenViewState extends State<_EditWorkoutScreenView> {
   final _scrollController = ScrollController();
-  late String _title;
+  StreamSubscription? _closeChatSubscription;
+
   @override
   void initState() {
     super.initState();
-    _title = widget.workout.title;
-    if (widget.initialIntervals != null) {
-      _intervals = widget.initialIntervals!;
-      _setCount = 1; // Sequence is one big set
-      _isLoading = false;
-    } else {
-      _fetchIntervals();
-    }
+    // Defer access to context
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifier = context.read<EditWorkoutNotifier>();
+      _closeChatSubscription = notifier.closeVoiceChatStream.listen((_) {
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.of(context).pop();
+        }
+      });
+    });
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _closeChatSubscription?.cancel();
     super.dispose();
   }
 
-  Future<void> _showEditTitleDialog() async {
-    final controller = TextEditingController(text: _title);
+  Future<void> _showEditTitleDialog(EditWorkoutNotifier notifier) async {
+    final controller = TextEditingController(text: notifier.session.name);
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -82,179 +91,57 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
       ),
     );
     if (result != null && result.isNotEmpty) {
-      setState(() => _title = result);
+      notifier.updateSessionName(result);
     }
   }
 
-  void _insertIntervals(int index, List<IntervalKind> kinds) {
-    final isAppending = index >= _intervals.length;
-    setState(() {
-      final newIntervals = kinds.map((kind) {
-        final newId =
-            '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
-        String title;
-        int duration;
-        switch (kind) {
-          case IntervalKind.prepare:
-            title = 'Подготовка';
-            duration = 10;
-            break;
-          case IntervalKind.work:
-            title = 'Работа';
-            duration = 30;
-            break;
-          case IntervalKind.rest:
-            title = 'Отдых';
-            duration = 15;
-            break;
-          case IntervalKind.between_sets:
-            title = 'Отдых между сетами';
-            duration = 60;
-            break;
-          default:
-            title = kind.name.capitalize();
-            duration = 60;
-        }
-        return Interval(
-          id: newId,
-          kind: kind,
-          durationSec: duration,
-          title: title,
-        );
-      }).toList();
-      final List<Interval> updatedList = List.from(_intervals)
-        ..insertAll(index, newIntervals);
-      _intervals = updatedList;
-    });
-    if (isAppending) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
-      });
-    }
-  }
-
-  Future<void> _fetchIntervals() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-    try {
-      final dbHelper = DatabaseHelper.instance;
-      final intervals = await dbHelper.getIntervalsForWorkout(
-        widget.workout.id,
-      );
-      final setCount = await dbHelper.getSetCountForWorkout(widget.workout.id);
-      if (!mounted) return;
-      setState(() {
-        _intervals = intervals;
-        _setCount = setCount;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Ошибка загрузки тренировки: $e';
-      });
-    }
-  }
-
-  Future<void> _saveWorkout() async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
-    // Create a new workout object with the potentially updated title,
-    // while preserving all other properties from the original workout object.
-    final workoutToSave = Workout(
-      id: widget.workout.id,
-      title: _title,
-      previewLines: widget.workout.previewLines,
-      totalTime: widget.workout.totalTime,
-      intervalsCount: widget.workout.intervalsCount,
-      hasSettings: widget.workout.hasSettings,
-      hasNotes: widget.workout.hasNotes,
-      notes: widget.workout.notes,
-      repeats: widget.workout.repeats,
+  Future<void> _showEditBlockLabelDialog(
+    EditWorkoutNotifier notifier,
+    Block block,
+  ) async {
+    final controller = TextEditingController(text: block.label ?? block.type);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Название блока'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Введите название',
+            hintText: 'Например: Разминка',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).pop(controller.text.trim());
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
     );
-    try {
-      await DatabaseHelper.instance.saveWorkout(
-        workoutToSave,
-        _intervals,
-        _setCount,
-      );
-      if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Тренировка сохранена!')),
-      );
-      Navigator.of(context).pop();
-    } catch (e) {
-      if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
+    if (result != null && result.isNotEmpty) {
+      notifier.updateBlockLabel(block, result);
     }
   }
 
-  void _changeDuration(String intervalId, int delta) {
-    setState(() {
-      final interval = _intervals.firstWhere((i) => i.id == intervalId);
-
-      if (interval.isRepsBased) {
-        final repsDelta = delta > 0 ? 1 : -1;
-        interval.reps = (interval.reps + repsDelta).clamp(0, 1000);
-      } else {
-        interval.durationSec = (interval.durationSec + delta).clamp(0, 86400);
-      }
-    });
-  }
-
-  void _deleteInterval(String intervalId) {
-    setState(() {
-      _intervals.removeWhere((i) => i.id == intervalId);
-    });
-  }
-
-  void _updateIntervalDescription(String id, String description) {
-    final interval = _intervals.firstWhere((i) => i.id == id);
-    interval.description = description;
-  }
-
-  void _toggleMetric(String intervalId) {
-    setState(() {
-      final interval = _intervals.firstWhere((i) => i.id == intervalId);
-      interval.isRepsBased = !interval.isRepsBased;
-    });
-  }
-
-  void _onReorder(int oldIndex, int newIndex) {
-    setState(() {
-      if (newIndex > oldIndex) {
-        newIndex -= 1;
-      }
-      final item = _intervals.removeAt(oldIndex);
-      _intervals.insert(newIndex, item);
-    });
-  }
-
-  String _formatDuration(int totalSeconds) {
-    final duration = Duration(seconds: totalSeconds);
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return '$minutes:$seconds';
-  }
-
-  Future<void> _showSetCountDialog() async {
-    final controller = TextEditingController(text: _setCount.toString());
+  Future<void> _showSetRepeatDialog(
+    EditWorkoutNotifier notifier,
+    Set set,
+  ) async {
+    final controller = TextEditingController(text: set.repeat.toString());
     final newCountStr = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Количество сетов'),
+        title: const Text('Количество повторов сета'),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -277,52 +164,136 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
     if (newCountStr != null) {
       final newCount = int.tryParse(newCountStr);
       if (newCount != null && newCount > 0) {
-        setState(() => _setCount = newCount);
+        notifier.updateSetRepeat(set, newCount);
       }
     }
   }
 
-  void _duplicateInterval(int index) {
-    setState(() {
-      final originalInterval = _intervals[index];
-      final newId =
-          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
-      final newInterval = Interval(
-        id: newId,
-        kind: originalInterval.kind,
-        title: originalInterval.title,
-        description: originalInterval.description,
-        durationSec: originalInterval.durationSec,
-        reps: originalInterval.reps,
-        isRepsBased: originalInterval.isRepsBased,
-        imageUri: originalInterval.imageUri,
-      );
-      _intervals.insert(index + 1, newInterval);
-    });
+  Future<void> _showVoiceChatBottomSheet(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider<EditWorkoutNotifier>.value(
+        value: notifier,
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          minChildSize: 0.4,
+          maxChildSize: 1.0,
+          builder: (BuildContext context, ScrollController scrollController) {
+            return _VoiceChatView(
+              notifier: notifier,
+              scrollController: scrollController,
+            );
+          },
+        ),
+      ),
+    );
   }
 
-  Future<void> _pickImageForInterval(String intervalId) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      setState(() {
-        final interval = _intervals.firstWhere((i) => i.id == intervalId);
-        interval.imageUri = pickedFile.path;
+  void _handleVoiceFabTap(
+    BuildContext context,
+    EditWorkoutNotifier notifier,
+    bool isListening,
+  ) {
+    if (isListening) {
+      notifier.toggleListening();
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    } else {
+      notifier.clearConversationLog();
+      notifier.toggleListening();
+      _showVoiceChatBottomSheet(context).whenComplete(() {
+        if (context.read<EditWorkoutNotifier>().voskState ==
+            VoskState.listening) {
+          context.read<EditWorkoutNotifier>().toggleListening();
+        }
       });
     }
   }
 
-  void _removeImageFromInterval(String intervalId) {
-    setState(() {
-      final interval = _intervals.firstWhere((i) => i.id == intervalId);
-      interval.imageUri = null;
-    });
+  Future<void> _saveWorkout(EditWorkoutNotifier notifier) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Сохранение...')));
+
+    final success = await notifier.saveWorkout();
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (success) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Тренировка сохранена!')),
+      );
+      Navigator.of(context).pop();
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Ошибка сохранения')),
+      );
+    }
+  }
+
+  Widget _buildBody(EditWorkoutNotifier notifier) {
+    return ReorderableListView.builder(
+      scrollController: _scrollController,
+      buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) {
+        return ChangeNotifierProvider.value(
+          value: notifier,
+          child: Material(
+            elevation: 4.0,
+            color: Colors.transparent,
+            child: child,
+          ),
+        );
+      },
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
+      itemCount: notifier.session.blocks.length,
+      itemBuilder: (context, index) {
+        final block = notifier.session.blocks[index];
+        return _BlockCard(
+          key: ValueKey(block.id),
+          index: index,
+          isContext: notifier.context == block,
+          block: block,
+          onAddSet: () => notifier.addSet(block),
+          onEditLabel: () => _showEditBlockLabelDialog(notifier, block),
+          onDelete: () => notifier.deleteBlock(index),
+          onDuplicate: () => notifier.duplicateBlock(index),
+          onDuplicateSet: (block, set) => notifier.duplicateSet(block, set),
+          onAddExercise: (set) => notifier.addExercise(set),
+          onAddRest: (set) => notifier.addRest(set),
+          onDeleteItem: (set, item) => notifier.deleteItem(set, item),
+          onDeleteSet: (block, set) => notifier.deleteSet(block, set),
+          isSetContext: (set) => notifier.context == set,
+          onShowSetRepeatDialog: (set) => _showSetRepeatDialog(notifier, set),
+          onReorderSet: (set, oldIndex, newIndex) =>
+              notifier.reorderSetItem(set, oldIndex, newIndex),
+          onReorderSetsInBlock: (block, oldIndex, newIndex) =>
+              notifier.reorderSetsInBlock(block, oldIndex, newIndex),
+          onDuplicateItem: (set, item) => notifier.duplicateItem(set, item),
+          onInsertItem: (set, index, item) =>
+              notifier.insertItem(set, index, item),
+          onPickImage: (exercise) => notifier.pickImage(exercise),
+          onRemoveImage: (exercise) => notifier.removeImage(exercise),
+          generateId: () =>
+              '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}',
+        );
+      },
+      onReorder: (oldIndex, newIndex) =>
+          notifier.reorderBlock(oldIndex, newIndex),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final notifier = context.watch<EditWorkoutNotifier>();
+    final voskState = notifier.voskState;
+    final isListening = voskState == VoskState.listening;
     return Scaffold(
+      backgroundColor: isListening
+          ? Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.3)
+          : null,
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
@@ -331,491 +302,723 @@ class _EditWorkoutScreenState extends State<EditWorkoutScreen> {
         surfaceTintColor: Colors.transparent,
         title: Semantics(
           button: true,
-          label: 'Название тренировки: $_title',
+          label: 'Название тренировки: ${notifier.session.name}',
           onTapHint: 'Редактировать название',
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
               HapticFeedback.selectionClick();
-              _showEditTitleDialog();
+              _showEditTitleDialog(notifier);
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 vertical: 6.0,
                 horizontal: 8.0,
               ),
-              child: Text(_title),
+              child: Text(notifier.session.name),
             ),
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _showSetCountDialog,
-            child: Text('Сеты: $_setCount'),
-          ),
           IconButton(
             icon: const Icon(Icons.check_sharp),
             tooltip: 'Сохранить',
-            onPressed: _saveWorkout,
+            onPressed: () => _saveWorkout(notifier),
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: _buildBody(),
-      floatingActionButton: MenuAnchor(
-        style: MenuStyle(
-          backgroundColor: WidgetStateProperty.all(
-            Theme.of(context).colorScheme.surfaceContainerHighest,
-          ),
-          elevation: WidgetStateProperty.all(3.0),
-          shape: WidgetStateProperty.all(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-          ),
-        ),
-        builder: (context, controller, child) {
-          return FloatingActionButton(
-            onPressed: () {
-              if (controller.isOpen) {
-                controller.close();
-              } else {
-                HapticFeedback.selectionClick();
-                controller.open();
-              }
-            },
-            child: const Icon(Icons.add),
+      body: _buildBody(notifier),
+      floatingActionButton: Consumer<EditWorkoutNotifier>(
+        builder: (context, notifier, child) {
+          final voskState = notifier.voskState;
+          final isListening = voskState == VoskState.listening;
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'voiceInputFab',
+                onPressed:
+                    (voskState == VoskState.ready ||
+                        voskState == VoskState.listening)
+                    ? () => _handleVoiceFabTap(context, notifier, isListening)
+                    : null,
+                tooltip: 'Голосовой ввод',
+                backgroundColor: isListening
+                    ? Theme.of(context).colorScheme.tertiaryContainer
+                    : null,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (child, animation) =>
+                      ScaleTransition(scale: animation, child: child),
+                  child: isListening
+                      ? const Icon(Icons.mic_off, key: ValueKey('listening'))
+                      : const Icon(Icons.mic, key: ValueKey('ready')),
+                ),
+              ),
+              const SizedBox(height: 16),
+              child!,
+            ],
           );
         },
-        menuChildren: [
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [IntervalKind.prepare]);
+        child: FloatingActionButton(
+          heroTag: 'addBlockFab',
+          onPressed: () => context.read<EditWorkoutNotifier>().addBlock(),
+          tooltip: 'Добавить блок',
+          child: const Icon(Icons.add),
+        ),
+      ),
+    );
+  }
+}
+
+class _BlockCard extends StatelessWidget {
+  final Block block;
+  final bool isContext;
+  final int index;
+  final VoidCallback onAddSet;
+  final VoidCallback onEditLabel;
+  final VoidCallback onDelete;
+  final VoidCallback onDuplicate;
+  final void Function(Set) onAddExercise;
+  final void Function(Set) onAddRest;
+  final void Function(Set, SetItem) onDeleteItem;
+  final void Function(Block, Set) onDeleteSet;
+  final bool Function(Set) isSetContext;
+  final void Function(Set, int, int) onReorderSet;
+  final void Function(Block, int, int) onReorderSetsInBlock;
+  final void Function(Set) onShowSetRepeatDialog;
+  final void Function(Set, SetItem) onDuplicateItem;
+  final void Function(Set, int, SetItem) onInsertItem;
+  final Future<void> Function(Exercise) onPickImage;
+  final void Function(Exercise) onRemoveImage;
+  final void Function(Block, Set) onDuplicateSet;
+  final String Function() generateId;
+
+  const _BlockCard({
+    super.key,
+    required this.block,
+    required this.isContext,
+    required this.index,
+    required this.onAddSet,
+    required this.onEditLabel,
+    required this.onDelete,
+    required this.onDuplicate,
+    required this.onDuplicateSet,
+    required this.onDeleteSet,
+    required this.onAddExercise,
+    required this.onAddRest,
+    required this.onDeleteItem,
+    required this.onReorderSet,
+    required this.onReorderSetsInBlock,
+    required this.onShowSetRepeatDialog,
+    required this.onDuplicateItem,
+    required this.onInsertItem,
+    required this.onPickImage,
+    required this.onRemoveImage,
+    required this.generateId,
+    required this.isSetContext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
+      child: ExpansionTile(
+        key: ValueKey('block_${block.id}'),
+        initiallyExpanded: notifier.expandedBlockId == block.id,
+        shape: const RoundedRectangleBorder(
+          side: BorderSide(color: Colors.transparent),
+        ),
+        collapsedShape: const RoundedRectangleBorder(
+          side: BorderSide(color: Colors.transparent),
+        ),
+        onExpansionChanged: (_) => notifier.toggleBlockExpansion(block.id),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                block.label ?? block.type,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        leading: ReorderableDragStartListener(
+          index: index,
+          child: const Icon(Icons.drag_handle),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'edit') onEditLabel();
+                if (value == 'delete') onDelete();
+                if (value == 'duplicate') onDuplicate();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Переименовать'),
+                ),
+                const PopupMenuItem(
+                  value: 'duplicate',
+                  child: Text('Копировать блок'),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    'Удалить блок',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        children: [
+          ReorderableListView.builder(
+            buildDefaultDragHandles: false,
+            proxyDecorator: (child, index, animation) {
+              return ChangeNotifierProvider.value(
+                value: notifier,
+                child: Material(
+                  elevation: 4.0,
+                  color: Colors.transparent,
+                  child: child,
+                ),
+              );
             },
-            child: const Text('Подготовка'),
-          ),
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [IntervalKind.work]);
+            itemCount: block.sets.length,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, index) {
+              final set = block.sets[index];
+              return _SetCard(
+                key: ValueKey(set.id),
+                block: block,
+                index: index,
+                isContext: isSetContext(set),
+                set: set,
+                onAddExercise: () => onAddExercise(set),
+                onAddRest: () => onAddRest(set),
+                onDelete: () => onDeleteSet(block, set),
+                onDuplicate: () => onDuplicateSet(block, set),
+                onDeleteItem: (item) => onDeleteItem(set, item),
+                onReorder: (oldIndex, newIndex) =>
+                    onReorderSet(set, oldIndex, newIndex),
+                onShowSetRepeatDialog: () => onShowSetRepeatDialog(set),
+                onDuplicateItem: (item) => onDuplicateItem(set, item),
+                onInsertItem: (idx, item) => onInsertItem(set, idx, item),
+                onPickImage: onPickImage,
+                onRemoveImage: onRemoveImage,
+                generateId: generateId,
+              );
             },
-            child: const Text('Работа'),
+            onReorder: (old, newIdx) =>
+                onReorderSetsInBlock(block, old, newIdx),
           ),
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [IntervalKind.rest]);
-            },
-            child: const Text('Отдых'),
+          const SizedBox(height: 8),
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: onAddSet,
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить сет'),
+            ),
           ),
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [
-                IntervalKind.work,
-                IntervalKind.rest,
-              ]);
-            },
-            child: const Text('Работа + Отдых'),
-          ),
-          MenuItemButton(
-            onPressed: () {
-              HapticFeedback.selectionClick();
-              _insertIntervals(_intervals.length, [IntervalKind.between_sets]);
-            },
-            child: const Text('Отдых между сетами'),
-          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
+}
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_errorMessage != null) {
-      return Center(child: Text(_errorMessage!));
-    }
-    return ReorderableListView.builder(
-      scrollController: _scrollController,
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 88), // Space for FAB
-      buildDefaultDragHandles: false, // перетаскивание только за ручку
-      dragStartBehavior: DragStartBehavior.down, // отзывчивее старт драга
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      itemCount: _intervals.length,
-      itemBuilder: (context, index) {
-        final interval = _intervals[index];
-        return IntervalCard(
-          key: ValueKey(interval.id),
-          interval: interval,
-          index: index,
-          formatDuration: _formatDuration,
-          onDecrement: () => _changeDuration(interval.id, -1),
-          onIncrement: () => _changeDuration(interval.id, 1),
-          onDelete: () => _deleteInterval(interval.id),
-          onInsert: _insertIntervals,
-          onDescriptionChanged: (newDescription) =>
-              _updateIntervalDescription(interval.id, newDescription),
-          onToggleMetric: () => _toggleMetric(interval.id),
-          onEditValue: () {}, // диалог больше не нужен
-          onDuplicate: () => _duplicateInterval(index),
-          onAddPhoto: () => _pickImageForInterval(interval.id),
-          onRemovePhoto: () => _removeImageFromInterval(interval.id),
-        );
-      },
-      onReorder: _onReorder,
-      proxyDecorator: (Widget child, int index, Animation<double> animation) {
-        return Material(
-          elevation: 4.0,
-          color: Colors.transparent,
-          child: child,
-        );
-      },
+class _SetCard extends StatelessWidget {
+  final Block block;
+  final Set set;
+  final bool isContext;
+  final int index;
+  final VoidCallback onAddExercise;
+  final VoidCallback onAddRest;
+  final VoidCallback onDelete;
+  final VoidCallback onDuplicate;
+  final void Function(SetItem) onDeleteItem;
+  final void Function(int, int) onReorder;
+  final VoidCallback onShowSetRepeatDialog;
+  final void Function(SetItem) onDuplicateItem;
+  final void Function(int, SetItem) onInsertItem;
+  final Future<void> Function(Exercise) onPickImage;
+  final void Function(Exercise) onRemoveImage;
+  final String Function() generateId;
+
+  const _SetCard({
+    super.key,
+    required this.block,
+    required this.set,
+    required this.isContext,
+    required this.index,
+    required this.onAddExercise,
+    required this.onAddRest,
+    required this.onDelete,
+    required this.onDuplicate,
+    required this.onDeleteItem,
+    required this.onReorder,
+    required this.onShowSetRepeatDialog,
+    required this.onDuplicateItem,
+    required this.onInsertItem,
+    required this.onPickImage,
+    required this.onRemoveImage,
+    required this.generateId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final notifier = context.read<EditWorkoutNotifier>();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Card(
+        margin: EdgeInsets.zero,
+        shape: isContext
+            ? RoundedRectangleBorder(
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.secondary,
+                  width: 1.5,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              )
+            : null,
+        clipBehavior: Clip.antiAlias,
+        child: ExpansionTile(
+          key: ValueKey('set_${set.id}'),
+          initiallyExpanded: notifier.expandedSetId == set.id,
+          shape: const RoundedRectangleBorder(
+            side: BorderSide(color: Colors.transparent),
+          ),
+          collapsedShape: const RoundedRectangleBorder(
+            side: BorderSide(color: Colors.transparent),
+          ),
+          onExpansionChanged: (_) => notifier.toggleSetExpansion(set.id, block),
+          leading: ReorderableDragStartListener(
+            index: index,
+            child: const Icon(Icons.drag_handle),
+          ),
+          title: Text(set.label ?? 'Сет'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: onShowSetRepeatDialog,
+                child: Text('x ${set.repeat}'),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'delete') onDelete();
+                  if (value == 'duplicate') onDuplicate();
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'duplicate',
+                    child: Text('Копировать сет'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Удалить сет',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: ReorderableListView.builder(
+                buildDefaultDragHandles: false,
+                proxyDecorator: (child, index, animation) {
+                  return ChangeNotifierProvider.value(
+                    value: notifier,
+                    child: Material(
+                      elevation: 4.0,
+                      color: Colors.transparent,
+                      child: child,
+                    ),
+                  );
+                },
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: set.items.length,
+                itemBuilder: (context, index) {
+                  final notifier = context.read<EditWorkoutNotifier>();
+                  final item = set.items[index];
+                  if (item is Exercise) {
+                    return Listener(
+                      key: ValueKey(item.id),
+                      onPointerDown: (_) => notifier.setContext(set),
+                      child: _ExerciseItemCard(
+                        isContext: notifier.context == item,
+                        exercise: item,
+                        index: index,
+                        onDelete: () => onDeleteItem(item),
+                        onDuplicate: () => onDuplicateItem(item),
+                        onInsert: (idx, item) => onInsertItem(idx, item),
+                        onPickImage: () => onPickImage(item),
+                        onRemoveImage: () => onRemoveImage(item),
+                        generateId: generateId,
+                      ),
+                    );
+                  }
+                  if (item is Rest) {
+                    return Listener(
+                      key: ValueKey(item.id),
+                      onPointerDown: (_) => notifier.setContext(set),
+                      child: _RestItemCard(
+                        isContext: notifier.context == item,
+                        rest: item,
+                        index: index,
+                        onDelete: () => onDeleteItem(item),
+                        onDuplicate: () => onDuplicateItem(item),
+                        onInsert: (idx, item) => onInsertItem(idx, item),
+                        generateId: generateId,
+                      ),
+                    );
+                  }
+                  return SizedBox.shrink(key: ValueKey(item.id));
+                },
+                onReorder: onReorder,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, right: 8.0, bottom: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: onAddExercise,
+                    icon: const Icon(Icons.fitness_center),
+                    label: const Text('Упражнение'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: onAddRest,
+                    icon: const Icon(Icons.pause),
+                    label: const Text('Отдых'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class IntervalCard extends StatefulWidget {
-  final Interval interval;
+class _ExerciseItemCard extends StatefulWidget {
+  final Exercise exercise;
+  final bool isContext;
   final int index;
-  final String Function(int) formatDuration;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
   final VoidCallback onDelete;
-  final void Function(int index, List<IntervalKind> kinds) onInsert;
-  final void Function(String newDescription) onDescriptionChanged;
-  final VoidCallback onToggleMetric;
-  final VoidCallback onEditValue;
   final VoidCallback onDuplicate;
-  final VoidCallback onAddPhoto;
-  final VoidCallback onRemovePhoto;
-  const IntervalCard({
-    super.key,
-    required this.interval,
+  final void Function(int, SetItem) onInsert;
+  final VoidCallback onPickImage;
+  final VoidCallback onRemoveImage;
+  final String Function() generateId;
+
+  const _ExerciseItemCard({
+    required this.isContext,
+    required this.exercise,
     required this.index,
-    required this.formatDuration,
-    required this.onIncrement,
-    required this.onDecrement,
     required this.onDelete,
-    required this.onInsert,
-    required this.onDescriptionChanged,
-    required this.onToggleMetric,
-    required this.onEditValue,
     required this.onDuplicate,
-    required this.onAddPhoto,
-    required this.onRemovePhoto,
+    required this.onInsert,
+    required this.onPickImage,
+    required this.onRemoveImage,
+    required this.generateId,
   });
 
   @override
-  State<IntervalCard> createState() => _IntervalCardState();
+  State<_ExerciseItemCard> createState() => _ExerciseItemCardState();
 }
 
-class _IntervalCardState extends State<IntervalCard> {
-  late final TextEditingController _descriptionController;
-  late final TextEditingController _valueController; // для секунд/повторений
-  bool _dragPressed =
-      false; // визуальная подсветка при нажатии на ручку перетаскивания
+class _ExerciseItemCardState extends State<_ExerciseItemCard> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _valueController;
+  late final TextEditingController _loadController;
+  late final TextEditingController _tempoController;
 
   @override
   void initState() {
     super.initState();
-    _descriptionController = TextEditingController(
-      text: widget.interval.description,
-    );
+    _nameController = TextEditingController(text: widget.exercise.name);
     _valueController = TextEditingController(
-      text:
-          (widget.interval.kind == IntervalKind.work &&
-              widget.interval.isRepsBased)
-          ? widget.interval.reps.toString()
-          : widget.interval.durationSec.toString(),
+      text: widget.exercise.isRepsBased
+          ? widget.exercise.reps.toString()
+          : widget.exercise.durationSec.toString(),
     );
-
-    // _descriptionController.addListener(() {
-    //   widget.onDescriptionChanged(_descriptionController.text);
-    // });
+    _loadController = TextEditingController(
+      text: widget.exercise.loadKg?.toString() ?? '',
+    );
+    _tempoController = TextEditingController(text: widget.exercise.tempo ?? '');
   }
 
   @override
   void dispose() {
-    _descriptionController.dispose();
+    _nameController.dispose();
     _valueController.dispose();
+    _loadController.dispose();
+    _tempoController.dispose();
     super.dispose();
   }
 
   @override
-  void didUpdateWidget(covariant IntervalCard oldWidget) {
+  void didUpdateWidget(covariant _ExerciseItemCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Синхронизируем поле, если значение поменяли +/- или переключили метрику
-    final isReps =
-        widget.interval.kind == IntervalKind.work &&
-        widget.interval.isRepsBased;
-    final newText = isReps
-        ? widget.interval.reps.toString()
-        : widget.interval.durationSec.toString();
+    final newText = widget.exercise.isRepsBased
+        ? widget.exercise.reps.toString()
+        : widget.exercise.durationSec.toString();
     if (_valueController.text != newText) {
       _valueController.text = newText;
     }
+    if (widget.exercise.name != _nameController.text) {
+      _nameController.text = widget.exercise.name;
+    }
   }
 
-  Future<void> _showDescriptionDialog() async {
-    final controller = TextEditingController(text: _descriptionController.text);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Описание интервала'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: null,
-            textInputAction: TextInputAction.newline,
-            decoration: const InputDecoration(
-              labelText: 'Добавить описание',
-              hintText: 'Например: Отжимания 15 раз',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                Navigator.of(context).pop(controller.text);
-              },
-              child: const Text('Сохранить'),
-            ),
-          ],
-        );
-      },
-    );
-    if (result != null) {
-      _descriptionController.text = result;
-      widget.onDescriptionChanged(result);
-      setState(() {}); // обновим превью текста на карточке
-    }
+  void _changeValue(int delta) {
+    setState(() {
+      if (widget.exercise.isRepsBased) {
+        final newValue = (widget.exercise.reps + delta).clamp(0, 1000);
+        widget.exercise.reps = newValue;
+        _valueController.text = newValue.toString();
+      } else {
+        final newValue = (widget.exercise.durationSec + delta).clamp(0, 86400);
+        widget.exercise.durationSec = newValue;
+        _valueController.text = newValue.toString();
+      }
+    });
+  }
+
+  void _toggleMetric() {
+    setState(() {
+      widget.exercise.isRepsBased = !widget.exercise.isRepsBased;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final isWorkInterval = widget.interval.kind == IntervalKind.work;
-    final isReps = isWorkInterval && widget.interval.isRepsBased;
-    final unitLabel = isReps ? 'повт.' : 'сек.';
-    final Color? _baseColor = isWorkInterval
-        ? colorScheme.surfaceContainerLow
-        : null;
+    final unitLabel = widget.exercise.isRepsBased ? 'пов.' : 'сек.';
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      // Подсветка карты во время нажатия на drag-handle
-      color: _dragPressed ? colorScheme.secondaryContainer : _baseColor,
+      shape: widget.isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.tertiary,
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ReorderableDragStartListener(
                 index: widget.index,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 12.0),
-                  child: Listener(
-                    onPointerDown: (_) {
-                      setState(() => _dragPressed = true);
-                      HapticFeedback.selectionClick();
-                    },
-                    onPointerCancel: (_) =>
-                        setState(() => _dragPressed = false),
-                    onPointerUp: (_) => setState(() => _dragPressed = false),
-                    child: Icon(Icons.drag_handle, color: theme.disabledColor),
-                  ),
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(12.0, 16.0, 12.0, 12.0),
+                  child: Icon(Icons.drag_handle),
                 ),
               ),
-
-              // _getIntervalIcon(widget.interval.kind, colorScheme),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-                      child: Text(
-                        widget.interval.title ??
-                            widget.interval.kind.name.capitalize(),
-                        style: theme.textTheme.titleMedium,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.remove),
-                          onPressed: widget.onDecrement,
-                          tooltip: 'Уменьшить',
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Упражнение/описание',
+                          border: InputBorder.none,
+                          isDense: true,
                         ),
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 72,
-                              maxWidth: 140,
-                            ),
-                            child: TextField(
-                              controller: _valueController,
-                              textAlign: TextAlign.center,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
-                              decoration: InputDecoration(
-                                isDense: true,
-                                border: InputBorder.none,
-                                hintText: '0',
-                                contentPadding: EdgeInsets.zero,
-                                // единица измерения внутри поля
-                                suffixText: unitLabel,
-                                suffixStyle: theme.textTheme.bodyLarge,
+                        onChanged: (value) => widget.exercise.name = value,
+                        textCapitalization: TextCapitalization.sentences,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.remove),
+                            onPressed: () => _changeValue(-1),
+                          ),
+                          Flexible(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 80),
+                              child: TextField(
+                                controller: _valueController,
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                  suffixText: unitLabel,
+                                  suffixStyle: theme.textTheme.bodyLarge,
+                                ),
+                                style: theme.textTheme.bodyLarge,
+                                onChanged: (txt) {
+                                  final v = int.tryParse(txt) ?? 0;
+                                  setState(() {
+                                    if (widget.exercise.isRepsBased) {
+                                      widget.exercise.reps = v.clamp(0, 1000);
+                                    } else {
+                                      widget.exercise.durationSec = v.clamp(
+                                        0,
+                                        86400,
+                                      );
+                                    }
+                                  });
+                                },
                               ),
-                              style: theme.textTheme.bodyLarge,
-                              // Обновляем модель по вводу (секунды/повторения как число)
-                              onChanged: (txt) {
-                                final v = int.tryParse(txt) ?? 0;
-                                if (isReps) {
-                                  widget.interval.reps = v.clamp(0, 1000);
-                                } else {
-                                  widget.interval.durationSec = v.clamp(
-                                    0,
-                                    86400,
-                                  );
-                                }
-                                setState(() {}); // мгновенная отрисовка
-                              },
                             ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add),
-                          onPressed: widget.onIncrement,
-                          tooltip: 'Увеличить',
-                        ),
-                      ],
-                    ),
-                  ],
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.add),
+                            onPressed: () => _changeValue(1),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              if (isWorkInterval)
-                IconButton(
-                  icon: Icon(
-                    widget.interval.isRepsBased
-                        ? Icons.repeat
-                        : Icons.timer_outlined,
-                  ),
-                  onPressed: widget.onToggleMetric,
-                  tooltip:
-                      'Сменить на ${widget.interval.isRepsBased ? "время" : "повторения"}',
-                )
-              else
-                const SizedBox(width: 48),
-
-              MenuAnchor(
-                builder: (context, controller, child) {
-                  return IconButton(
-                    icon: const Icon(Icons.more_vert),
-                    tooltip: 'Действия',
-                    onPressed: () {
-                      HapticFeedback.selectionClick();
-                      if (controller.isOpen) {
-                        controller.close();
-                      } else {
-                        controller.open();
-                      }
-                    },
-                  );
+              IconButton(
+                icon: Icon(
+                  widget.exercise.isRepsBased
+                      ? Icons.repeat
+                      : Icons.timer_outlined,
+                ),
+                onPressed: _toggleMetric,
+                tooltip:
+                    'Сменить на ${widget.exercise.isRepsBased ? "время" : "повторения"}',
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  switch (value) {
+                    case 'delete':
+                      widget.onDelete();
+                      break;
+                    case 'duplicate':
+                      widget.onDuplicate();
+                      break;
+                    case 'insert_ex_above':
+                      widget.onInsert(
+                        widget.index,
+                        Exercise(
+                          id: widget.generateId(),
+                          name: 'Новое упражнение',
+                        ),
+                      );
+                      break;
+                    case 'insert_rest_above':
+                      widget.onInsert(
+                        widget.index,
+                        Rest(id: widget.generateId(), durationSec: 60),
+                      );
+                      break;
+                    case 'insert_ex_below':
+                      widget.onInsert(
+                        widget.index + 1,
+                        Exercise(
+                          id: widget.generateId(),
+                          name: 'Новое упражнение',
+                        ),
+                      );
+                      break;
+                    case 'insert_rest_below':
+                      widget.onInsert(
+                        widget.index + 1,
+                        Rest(id: widget.generateId(), durationSec: 60),
+                      );
+                      break;
+                    case 'add_photo':
+                      widget.onPickImage();
+                      break;
+                    case 'remove_photo':
+                      widget.onRemoveImage();
+                      break;
+                  }
                 },
-                menuChildren: [
-                  SubmenuButton(
-                    menuChildren: [
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index, [
-                          IntervalKind.prepare,
-                        ]),
-                        child: const Text('Подготовка'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () =>
-                            widget.onInsert(widget.index, [IntervalKind.work]),
-                        child: const Text('Работа'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () =>
-                            widget.onInsert(widget.index, [IntervalKind.rest]),
-                        child: const Text('Отдых'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index, [
-                          IntervalKind.work,
-                          IntervalKind.rest,
-                        ]),
-                        child: const Text('Работа + Отдых'),
-                      ),
-                    ],
-                    child: const Text('Вставить выше'),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'duplicate',
+                    child: Text('Копировать'),
                   ),
-                  SubmenuButton(
-                    menuChildren: [
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index + 1, [
-                          IntervalKind.prepare,
-                        ]),
-                        child: const Text('Подготовка'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index + 1, [
-                          IntervalKind.work,
-                        ]),
-                        child: const Text('Работа'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index + 1, [
-                          IntervalKind.rest,
-                        ]),
-                        child: const Text('Отдых'),
-                      ),
-                      MenuItemButton(
-                        onPressed: () => widget.onInsert(widget.index + 1, [
-                          IntervalKind.work,
-                          IntervalKind.rest,
-                        ]),
-                        child: const Text('Работа + Отдых'),
-                      ),
-                    ],
-                    child: const Text('Вставить ниже'),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'insert_ex_above',
+                    child: Text('Вставить упражнение выше'),
                   ),
-                  MenuItemButton(
-                    onPressed: widget.onDuplicate,
-                    child: const Text('Копировать'),
+                  const PopupMenuItem(
+                    value: 'insert_rest_above',
+                    child: Text('Вставить отдых выше'),
                   ),
-                  MenuItemButton(
-                    onPressed: widget.onAddPhoto,
+                  const PopupMenuItem(
+                    value: 'insert_ex_below',
+                    child: Text('Вставить упражнение ниже'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'insert_rest_below',
+                    child: Text('Вставить отдых ниже'),
+                  ),
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'add_photo',
                     child: Text(
-                      widget.interval.imageUri == null
+                      widget.exercise.imageUri == null
                           ? 'Добавить фото'
                           : 'Изменить фото',
                     ),
                   ),
-                  if (widget.interval.imageUri != null)
-                    MenuItemButton(
-                      onPressed: widget.onRemovePhoto,
-                      child: const Text('Удалить фото'),
+                  if (widget.exercise.imageUri != null)
+                    const PopupMenuItem(
+                      value: 'remove_photo',
+                      child: Text('Удалить фото'),
                     ),
-                  const Divider(),
-                  MenuItemButton(
-                    onPressed: widget.onDelete,
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'delete',
                     child: Text(
                       'Удалить',
-                      style: TextStyle(color: colorScheme.error),
+                      style: TextStyle(color: theme.colorScheme.error),
                     ),
                   ),
                 ],
@@ -823,41 +1026,45 @@ class _IntervalCardState extends State<IntervalCard> {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
-            child: Semantics(
-              button: true,
-              label: 'Добавить или изменить описание интервала',
-              onTapHint: 'Открыть диалог редактирования',
-              child: InkWell(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  _showDescriptionDialog();
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text(
-                    (_descriptionController.text.isEmpty)
-                        ? 'Добавить описание'
-                        : _descriptionController.text,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: (_descriptionController.text.isEmpty)
-                          ? theme.hintColor
-                          : null,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _loadController,
+                    decoration: const InputDecoration(
+                      labelText: 'Вес, кг',
+                      isDense: true,
                     ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onChanged: (value) =>
+                        widget.exercise.loadKg = double.tryParse(value),
                   ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _tempoController,
+                    decoration: const InputDecoration(
+                      labelText: 'Темп',
+                      hintText: '3-1-1',
+                      isDense: true,
+                    ),
+                    onChanged: (value) => widget.exercise.tempo = value,
+                  ),
+                ),
+              ],
             ),
           ),
-          if (widget.interval.imageUri != null &&
-              widget.interval.imageUri!.isNotEmpty)
+          if (widget.exercise.imageUri != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(80.0, 0, 16.0, 12.0),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12.0),
                 child: Image.file(
-                  File(widget.interval.imageUri!),
+                  File(widget.exercise.imageUri!),
                   height: 150,
                   width: double.infinity,
                   fit: BoxFit.cover,
@@ -870,8 +1077,308 @@ class _IntervalCardState extends State<IntervalCard> {
   }
 }
 
+class _RestItemCard extends StatefulWidget {
+  final Rest rest;
+  final bool isContext;
+  final int index;
+  final VoidCallback onDelete;
+  final VoidCallback onDuplicate;
+  final void Function(int, SetItem) onInsert;
+  final String Function() generateId;
+
+  const _RestItemCard({
+    required this.isContext,
+    required this.rest,
+    required this.index,
+    required this.onDelete,
+    required this.onDuplicate,
+    required this.onInsert,
+    required this.generateId,
+  });
+
+  @override
+  State<_RestItemCard> createState() => _RestItemCardState();
+}
+
+class _RestItemCardState extends State<_RestItemCard> {
+  late final TextEditingController _durationController;
+  late final TextEditingController _reasonController;
+
+  @override
+  void initState() {
+    super.initState();
+    _durationController = TextEditingController(
+      text: widget.rest.durationSec.toString(),
+    );
+    _reasonController = TextEditingController(text: widget.rest.reason);
+  }
+
+  @override
+  void dispose() {
+    _durationController.dispose();
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RestItemCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.rest.durationSec.toString() != _durationController.text) {
+      _durationController.text = widget.rest.durationSec.toString();
+    }
+  }
+
+  void _changeDuration(int delta) {
+    setState(() {
+      final newDuration = (widget.rest.durationSec + delta).clamp(0, 86400);
+      widget.rest.durationSec = newDuration;
+      _durationController.text = newDuration.toString();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: widget.isContext
+          ? RoundedRectangleBorder(
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.tertiary,
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
+      color: theme.colorScheme.surfaceContainerLow,
+      child: Row(
+        children: [
+          ReorderableDragStartListener(
+            index: widget.index,
+            child: const Padding(
+              padding: EdgeInsets.fromLTRB(12.0, 16.0, 12.0, 16.0),
+              child: Icon(Icons.drag_handle),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 16.0, top: 8),
+                  child: TextField(
+                    controller: _reasonController,
+                    decoration: const InputDecoration(
+                      labelText: 'Тип отдыха',
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                    onChanged: (value) => widget.rest.reason = value,
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.remove),
+                      onPressed: () => _changeDuration(-5),
+                    ),
+                    Flexible(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 80),
+                        child: TextField(
+                          controller: _durationController,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            border: InputBorder.none,
+                            suffixText: ' сек',
+                          ),
+                          onChanged: (value) {
+                            final newDuration = int.tryParse(value) ?? 0;
+                            setState(() {
+                              widget.rest.durationSec = newDuration;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.add),
+                      onPressed: () => _changeDuration(5),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'delete':
+                  widget.onDelete();
+                  break;
+                case 'duplicate':
+                  widget.onDuplicate();
+                  break;
+                case 'insert_ex_above':
+                  widget.onInsert(
+                    widget.index,
+                    Exercise(id: widget.generateId(), name: 'Новое упражнение'),
+                  );
+                  break;
+                case 'insert_rest_above':
+                  widget.onInsert(
+                    widget.index,
+                    Rest(id: widget.generateId(), durationSec: 60),
+                  );
+                  break;
+                case 'insert_ex_below':
+                  widget.onInsert(
+                    widget.index + 1,
+                    Exercise(id: widget.generateId(), name: 'Новое упражнение'),
+                  );
+                  break;
+                case 'insert_rest_below':
+                  widget.onInsert(
+                    widget.index + 1,
+                    Rest(id: widget.generateId(), durationSec: 60),
+                  );
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'duplicate',
+                child: Text('Копировать'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'insert_ex_above',
+                child: Text('Вставить упражнение выше'),
+              ),
+              const PopupMenuItem(
+                value: 'insert_rest_above',
+                child: Text('Вставить отдых выше'),
+              ),
+              const PopupMenuItem(
+                value: 'insert_ex_below',
+                child: Text('Вставить упражнение ниже'),
+              ),
+              const PopupMenuItem(
+                value: 'insert_rest_below',
+                child: Text('Вставить отдых ниже'),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(
+                  'Удалить',
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 extension StringExtension on String {
   String capitalize() {
     return "${this[0].toUpperCase()}${substring(1)}";
+  }
+}
+
+class _VoiceChatView extends StatelessWidget {
+  final EditWorkoutNotifier notifier;
+  final ScrollController scrollController;
+
+  const _VoiceChatView({
+    required this.notifier,
+    required this.scrollController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const SizedBox(width: 48),
+                Text('Голосовой помощник', style: theme.textTheme.titleMedium),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Consumer<EditWorkoutNotifier>(
+              builder: (context, notifier, child) {
+                final listScrollController = ScrollController();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (listScrollController.hasClients) {
+                    listScrollController.animateTo(
+                      listScrollController.position.maxScrollExtent,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                });
+                return ListView.builder(
+                  controller: listScrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: notifier.conversationLog.length,
+                  itemBuilder: (context, index) {
+                    final (message, isUserMessage) =
+                        notifier.conversationLog[index];
+                    final alignment = isUserMessage
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft;
+                    final color = isUserMessage
+                        ? theme.colorScheme.primaryContainer
+                        : theme.colorScheme.surfaceContainerHighest;
+                    return Align(
+                      alignment: alignment,
+                      child: Card(
+                        color: color,
+                        elevation: 1,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Text(message),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
