@@ -95,7 +95,7 @@ class _AgentEntryViewState extends State<AgentEntryView> {
           child: TextField(
             controller: _textController,
             decoration: const InputDecoration(
-              labelText: 'I want…',
+              labelText: '…',
               prefixIcon: Icon(Icons.auto_awesome),
             ),
             onSubmitted: (_) => _sendMessage(notifier),
