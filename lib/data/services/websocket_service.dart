@@ -13,6 +13,7 @@ class WebSocketService {
       StreamController.broadcast();
   bool _isConnecting = false;
   Timer? _reconnectTimer;
+  final List<String> _pendingMessages = [];
 
   Stream<String> get messages => _messageController.stream;
   Stream<ConnectionStatus> get status => _statusController.stream;
@@ -30,6 +31,7 @@ class WebSocketService {
       _isConnecting = false;
       _statusController.add(ConnectionStatus.connected);
       _reconnectTimer?.cancel();
+      _sendPendingMessages();
       _channel?.stream.listen(
         (message) {
           _messageController.add(message);
@@ -58,9 +60,21 @@ class WebSocketService {
     });
   }
 
+  void _sendPendingMessages() {
+    if (_channel != null && _channel?.closeCode == null) {
+      for (final message in _pendingMessages) {
+        _channel?.sink.add(message);
+      }
+      _pendingMessages.clear();
+    }
+  }
+
   void sendMessage(String message) {
     if (_channel != null && _channel?.closeCode == null) {
       _channel?.sink.add(message);
+    } else {
+      _pendingMessages.add(message);
+      connect();
     }
   }
 

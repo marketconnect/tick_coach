@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
+import 'package:tick_coach/application/agent_entry_notifier.dart';
 import 'package:provider/provider.dart';
 import 'package:tick_coach/domain/models/training_session.dart';
 import 'package:tick_coach/domain/repositories/workout_repository.dart';
@@ -201,6 +202,37 @@ class _WorkoutsScreenState extends State<WorkoutsScreen> {
       scrolledUnderElevation: 2.0,
       shadowColor: Colors.black,
       surfaceTintColor: Colors.transparent,
+      actions: [
+        if (!isWorkoutsTab)
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: 'Очистить историю',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Очистить историю?'),
+                  content: const Text(
+                    'Будут удалены все сообщения, кроме трех последних.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Отмена'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Очистить'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true && mounted) {
+                await context.read<AgentEntryNotifier>().clearOldMessages();
+              }
+            },
+          ),
+      ],
     );
   }
 

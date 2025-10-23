@@ -10,4 +10,5 @@ abstract class ChatRepository {
   void dispose();
   Future<List<ChatMessage>> getChatHistory();
   Future<void> saveChatMessage(ChatMessage message);
+  Future<void> deleteOldChatMessages();
 }

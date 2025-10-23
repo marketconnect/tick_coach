@@ -12,7 +12,7 @@ class AgentEntryNotifier extends ChangeNotifier {
   final ChatRepository _chatRepository;
 
   AgentEntryNotifier(this._chatRepository) {
-    _loadHistoryAndConnect();
+    _loadHistory();
   }
 
   List<ChatMessage> _messages = [];
@@ -26,15 +26,19 @@ class AgentEntryNotifier extends ChangeNotifier {
 
   StreamSubscription? _messageSubscription;
   StreamSubscription? _statusSubscription;
+  bool _connectionAttempted = false;
 
-  Future<void> _loadHistoryAndConnect() async {
+  Future<void> _loadHistory() async {
     final history = await _chatRepository.getChatHistory();
     _messages = history;
     notifyListeners();
-    _connect();
   }
 
   void _connect() {
+    if (_connectionAttempted) {
+      return;
+    }
+    _connectionAttempted = true;
     _statusSubscription = _chatRepository.status.listen((status) {
       _connectionStatus = status;
       notifyListeners();
@@ -45,6 +49,10 @@ class AgentEntryNotifier extends ChangeNotifier {
     });
 
     _chatRepository.connect();
+  }
+
+  void initiateConnection() {
+    _connect();
   }
 
   void _handleAssistantMessage(String data) {
@@ -141,6 +149,7 @@ class AgentEntryNotifier extends ChangeNotifier {
 
   void sendMessage(String text) {
     if (text.trim().isEmpty || _isWaitingForResponse) return;
+    initiateConnection();
     final userMessage = ChatMessage(
       id: _generateId(),
       text: text,
@@ -152,6 +161,11 @@ class AgentEntryNotifier extends ChangeNotifier {
     _messages.add(userMessage);
     _isWaitingForResponse = true;
     notifyListeners();
+  }
+
+  Future<void> clearOldMessages() async {
+    await _chatRepository.deleteOldChatMessages();
+    await _loadHistory();
   }
 
   String _generateId() {

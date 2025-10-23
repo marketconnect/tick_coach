@@ -41,4 +41,9 @@ class ChatRepositoryImpl implements ChatRepository {
 
   @override
   Stream<ConnectionStatus> get status => _webSocketService.status;
+
+  @override
+  Future<void> deleteOldChatMessages() {
+    return _databaseHelper.deleteOldChatMessages();
+  }
 }

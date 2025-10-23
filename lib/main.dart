@@ -1,5 +1,6 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:provider/provider.dart';
+import 'package:tick_coach/application/agent_entry_notifier.dart';
 import 'package:tick_coach/conf.dart';
 import 'package:tick_coach/data/datasources/database_helper.dart';
 
@@ -41,6 +42,10 @@ class AppWrapper extends StatelessWidget {
         ),
         ProxyProvider2<WebSocketService, DatabaseHelper, ChatRepository>(
           update: (_, ws, db, __) => ChatRepositoryImpl(ws, db),
+        ),
+        ChangeNotifierProvider(
+          create: (context) =>
+              AgentEntryNotifier(context.read<ChatRepository>()),
         ),
       ],
       child: const App(),

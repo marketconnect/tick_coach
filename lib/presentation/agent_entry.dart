@@ -15,10 +15,7 @@ class AgentEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => AgentEntryNotifier(context.read<ChatRepository>()),
-      child: const AgentEntryView(),
-    );
+    return const AgentEntryView();
   }
 }
 
@@ -32,6 +29,7 @@ class AgentEntryView extends StatefulWidget {
 class _AgentEntryViewState extends State<AgentEntryView> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  bool _didInitiateConnection = false;
 
   @override
   void dispose() {
@@ -96,6 +94,12 @@ class _AgentEntryViewState extends State<AgentEntryView> {
         Expanded(
           child: TextField(
             controller: _textController,
+            onChanged: (text) {
+              if (text.isNotEmpty && !_didInitiateConnection) {
+                notifier.initiateConnection();
+                _didInitiateConnection = true;
+              }
+            },
             decoration: const InputDecoration(
               labelText: 'I want…',
               prefixIcon: Icon(Icons.auto_awesome),

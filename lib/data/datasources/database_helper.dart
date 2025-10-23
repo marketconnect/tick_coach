@@ -344,4 +344,29 @@ class DatabaseHelper {
     }
     return maps.map((map) => ChatMessage.fromMap(map)).toList();
   }
+
+  Future<void> deleteOldChatMessages() async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM chat_messages'),
+    );
+    if (count == null || count <= 3) {
+      return; // Nothing to delete
+    }
+    final limit = count - 3;
+    final idsToDelete = (await db.query(
+      'chat_messages',
+      columns: ['id'],
+      orderBy: 'timestamp ASC',
+      limit: limit,
+    )).map((row) => row['id'] as String).toList();
+
+    if (idsToDelete.isNotEmpty) {
+      await db.delete(
+        'chat_messages',
+        where: 'id IN (${List.filled(idsToDelete.length, '?').join(',')})',
+        whereArgs: idsToDelete,
+      );
+    }
+  }
 }
